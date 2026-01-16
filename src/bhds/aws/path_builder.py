@@ -21,7 +21,8 @@ class AwsPathBuilder:
         self.trade_type = trade_type
         self.data_freq = data_freq
         self.data_type = data_type
-        self.base_dir = PurePosixPath("data") / trade_type / data_freq / data_type
+        # 显式地使用枚举对象的value属性，以兼容Python 3.9
+        self.base_dir = PurePosixPath("data") / trade_type.value / data_freq.value / data_type.value
 
     def get_symbol_dir(self, symbol: str) -> PurePosixPath:
         """

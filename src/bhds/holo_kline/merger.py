@@ -68,7 +68,8 @@ class Holo1mKlineMerger:
             pl.LazyFrame: Processed LazyFrame
         """
         # Use path_builder to build correct paths
-        kline_dir = self.base_dir / self.kline_builder.get_symbol_dir(symbol)
+        # 将PurePosixPath转换为str，然后构建Path对象，以兼容Python 3.9
+        kline_dir = self.base_dir / str(self.kline_builder.get_symbol_dir(symbol))
 
         if not kline_dir.exists():
             raise FileNotFoundError(f"Kline directory not found: {kline_dir}")
@@ -99,7 +100,8 @@ class Holo1mKlineMerger:
 
         # Add funding rate (optional, only for futures)
         if self.include_funding and self.trade_type != TradeType.spot:
-            funding_dir = self.base_dir / self.funding_builder.get_symbol_dir(symbol)
+            # 将PurePosixPath转换为str，然后构建Path对象，以兼容Python 3.9
+            funding_dir = self.base_dir / str(self.funding_builder.get_symbol_dir(symbol))
             if funding_dir.exists():
                 funding_ldf = pl.scan_parquet(funding_dir, extra_columns="ignore").unique("candle_begin_time")
                 ldf = ldf.join(
@@ -129,7 +131,8 @@ class Holo1mKlineMerger:
             list[pl.LazyFrame]: List of LazyFrames
         """
         # Get all symbols from kline directory
-        kline_base_dir = self.base_dir / self.kline_builder.base_dir
+        # 将PurePosixPath转换为str，然后构建Path对象，以兼容Python 3.9
+        kline_base_dir = self.base_dir / str(self.kline_builder.base_dir)
         symbols = [d.name for d in kline_base_dir.iterdir() if d.is_dir()]
 
         if target_symbols is not None:

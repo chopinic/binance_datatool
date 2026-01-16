@@ -63,7 +63,7 @@ def aria2_download_files(download_infos: list[tuple[str, Path]], http_proxy: Opt
         int: Exit code from aria2c process (0 for success, non-zero for failure)
     """
     # Create temporary file containing download URLs and directory mappings for aria2c
-    with tempfile.NamedTemporaryFile(mode="w", delete_on_close=False, prefix="bhds_") as aria_file:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, prefix="bhds_") as aria_file:
         # Write each download URL and its target directory to the temp file
         for aws_url, local_file in download_infos:
             aria_file.write(f"{aws_url}\n  dir={local_file.parent}\n")
