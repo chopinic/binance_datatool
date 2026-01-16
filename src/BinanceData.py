@@ -26,18 +26,29 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import style
 
-# 全局配置变量
-# 日志级别："debug" 或 "run"，debug输出所有日志，run只输出关键步骤和错误
-logLevel = "run"
-
 # 网络配置
 HTTP_PROXY = "http://127.0.0.1:7890"  # 7890代理
 
 # 数据路径配置
-BASE_DATA_PATH = "data"
-DATA_DIR = Path("d:/Codes/binance_datatool-main/data")  # 数据保存目录
-PARSED_DATA_DIR = Path("d:/Codes/binance_datatool-main/parsed_data")  # 解析后的数据目录
-OUTPUT_DIR = Path("d:/Codes/binance_datatool-main/output")  # 输出目录
+RootPath = r"D:\Codes\GitHub\BinanceData\Download"
+DATA_DIR = Path(f"{RootPath}/raw_data")  # 数据保存目录
+PARSED_DATA_DIR = Path(f"{RootPath}/parsed_data")  # 解析后的数据目录
+OUTPUT_DIR = Path(f"{RootPath}/output")  # 输出目录
+
+def setPath(rootPath):
+    global RootPath
+    global DATA_DIR
+    global PARSED_DATA_DIR
+    global OUTPUT_DIR
+    RootPath = rootPath
+    DATA_DIR = Path(f"{RootPath}/raw_data")  # 数据保存目录
+    PARSED_DATA_DIR = Path(f"{RootPath}/parsed_data")  # 解析后的数据目录
+    OUTPUT_DIR = Path(f"{RootPath}/output")  # 输出目录
+
+    Path(RootPath).mkdir(exist_ok=True)
+    DATA_DIR.mkdir(exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    PARSED_DATA_DIR.mkdir(exist_ok=True)
 
 # 临时文件路径
 WARNING_JSON = Path("./warning.json")  # 警告信息文件
@@ -57,14 +68,14 @@ def printLog(message, level="info"):
     
     Args:
         message: 日志消息
-        level: 日志级别，可选值："info"（普通信息）、"error"（错误）、"debug"（调试信息）
+        level: 日志级别，可选值："run"（重要信息）、"error"（错误）、"debug"（调试信息）
     """
     if logLevel == "debug":
         # debug级别输出所有日志
         print(message)
     else:
         # run级别只输出关键步骤开始点和错误
-        if level in ["run", "error"] or any(prefix in message for prefix in ["获取", "成功", "失败", "发现"]):
+        if level in ["run", "error"]:
             print(message)
 
 from bdt_common.constants import HTTP_TIMEOUT_SEC
@@ -152,7 +163,6 @@ def filter_files_by_time_range(files: List[Path], start_date: str, end_date: str
 async def _download_single_symbol_data(
     http_proxy: str,
     symbol: str,
-    data_dir: Path,
     data_type: DataType,
     time_interval: str,
     start_date: str,
@@ -174,7 +184,7 @@ async def _download_single_symbol_data(
         是否成功下载
     """
     try:
-        downloader = AwsDownloader(local_dir=data_dir, http_proxy=http_proxy, verbose=True)
+        downloader = AwsDownloader(local_dir=DATA_DIR, http_proxy=http_proxy, verbose=True)
         verifier = ChecksumVerifier(delete_mismatch=False)
         
         async with create_aiohttp_session(HTTP_TIMEOUT_SEC) as session:
@@ -197,18 +207,18 @@ async def _download_single_symbol_data(
                 return False
             
             # 下载文件
-            printLog(f"下载 {symbol} 的{data_type.value}数据...")
+            printLog(f"下载 {symbol} 的{data_type.value}数据...", level="run")
             printLog(f"  下载文件列表 ({len(range_files)} 个):", level="debug")
             for file in range_files:
                 printLog(f"    - {file.name}", level="debug")
             await downloader.aws_download(range_files)
             
             # 验证文件
-            data_type_path = f"{BASE_DATA_PATH}/{TradeType.um_futures.value}/daily/{data_type.value}/{symbol}"
+            data_type_path = f"{DATA_DIR}/data/{TradeType.um_futures.value}/daily/{data_type.value}/{symbol}"
             if data_type == DataType.kline:
                 data_type_path += f"/{time_interval}"
             
-            symbol_dir = data_dir / data_type_path
+            symbol_dir = Path(data_type_path)
             manager = AwsDataFileManager(symbol_dir)
             unverified_files = manager.get_unverified_files()
             
@@ -225,7 +235,6 @@ async def _download_single_symbol_data(
         return False
 
 async def _check_data_exists(
-    data_dir: Path,
     symbol: str,
     data_type: DataType,
     time_interval: str,
@@ -249,11 +258,11 @@ async def _check_data_exists(
     from datetime import datetime, timedelta
     import re
     
-    data_type_path = f"{BASE_DATA_PATH}/{TradeType.um_futures.value}/daily/{data_type.value}/{symbol}"
+    data_type_path = f"{DATA_DIR}/data/{TradeType.um_futures.value}/daily/{data_type.value}/{symbol}"
     if data_type == DataType.kline:
         data_type_path += f"/{time_interval}"
     
-    symbol_dir = data_dir / data_type_path
+    symbol_dir = Path(data_type_path)
     if not symbol_dir.exists():
         return False
     
@@ -295,8 +304,6 @@ async def get_kline_dataframe(
     symbol: str,
     start_date: str,
     end_date: str,
-    data_dir: Path,
-    parsed_data_dir: Path,
     time_interval: str = "1m",
     frequency: str = "1h"
 ) -> pl.DataFrame:
@@ -316,9 +323,9 @@ async def get_kline_dataframe(
     Returns:
         K线数据的DataFrame
     """
+    global PARSED_DATA_DIR
     # 检查数据是否已下载
     data_exists = await _check_data_exists(
-        data_dir=data_dir,
         symbol=symbol,
         data_type=DataType.kline,
         time_interval=time_interval,
@@ -331,21 +338,18 @@ async def get_kline_dataframe(
         await _download_single_symbol_data(
             http_proxy=http_proxy,
             symbol=symbol,
-            data_dir=data_dir,
             data_type=DataType.kline,
             time_interval=time_interval,
             start_date=start_date,
             end_date=end_date
         )
     else:
-        printLog(f"{symbol} 的K线数据已存在，跳过下载")
+        printLog(f"{symbol} 的K线数据已存在，跳过下载",level="run")
     
     # 解析数据
     parse_downloaded_data(
-        data_dir=data_dir,
         symbols=[symbol],
         time_interval=time_interval,
-        parsed_data_dir=parsed_data_dir,
         start_date=start_date,
         end_date=end_date
     )
@@ -356,7 +360,7 @@ async def get_kline_dataframe(
         temp_path = Path(temp_dir)
         
         # 生成全息K线
-        holo_files = generate_holo_klines(parsed_data_dir, TradeType.um_futures, temp_path, symbols=[symbol], start_date=start_date, end_date=end_date)
+        holo_files = generate_holo_klines(PARSED_DATA_DIR, TradeType.um_futures, temp_path, symbols=[symbol], start_date=start_date, end_date=end_date)
         
         if not holo_files:
             printLog(f"无法生成 {symbol} 的全息K线", level="error")
@@ -477,7 +481,6 @@ async def get_metrics_dataframe(
     symbol: str,
     start_date: str,
     end_date: str,
-    data_dir: Path
 ) -> pl.DataFrame:
     """
     获取单个货币对的Metrics数据DataFrame
@@ -494,7 +497,6 @@ async def get_metrics_dataframe(
     """
     # 检查数据是否已下载
     data_exists = await _check_data_exists(
-        data_dir=data_dir,
         symbol=symbol,
         data_type=DataType.metrics,
         time_interval="",
@@ -507,7 +509,6 @@ async def get_metrics_dataframe(
         await _download_single_symbol_data(
             http_proxy=http_proxy,
             symbol=symbol,
-            data_dir=data_dir,
             data_type=DataType.metrics,
             time_interval="",
             start_date=start_date,
@@ -516,7 +517,8 @@ async def get_metrics_dataframe(
     else:
         printLog(f"{symbol} 的Metrics数据已存在，跳过下载")
     
-    metrics_symbol_dir = data_dir / f"{BASE_DATA_PATH}/{TradeType.um_futures.value}/daily/{DataType.metrics.value}/{symbol}"
+    metrics_symbol_dir = f"{DATA_DIR}/data/{TradeType.um_futures.value}/daily/{DataType.metrics.value}/{symbol}"
+    metrics_symbol_dir = Path(metrics_symbol_dir)
     if metrics_symbol_dir.exists():
         manager = AwsDataFileManager(metrics_symbol_dir)
         verified_files = manager.get_verified_files()
@@ -561,7 +563,7 @@ async def get_metrics_dataframe(
                 if dfs:
                     # 合并所有DataFrame
                     combined_df = pl.concat(dfs)
-                    printLog(f"成功解析 {symbol} 的Metrics数据，共 {len(combined_df)} 行")
+                    printLog(f"成功解析 {symbol} 的Metrics数据，共 {len(combined_df)} 行",level="run")
                     return combined_df
                 else:
                     printLog(f"没有成功解析任何Metrics文件")
@@ -577,10 +579,8 @@ async def get_metrics_dataframe(
 
 
 def parse_downloaded_data(
-    data_dir: Path,
     symbols: List[str],
     time_interval: str,
-    parsed_data_dir: Path,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ) -> None:
@@ -603,7 +603,8 @@ def parse_downloaded_data(
         printLog(f"解析 {symbol}...", level="debug")
         
         # 解析K线数据
-        kline_symbol_dir = data_dir / f"{BASE_DATA_PATH}/{TradeType.um_futures.value}/daily/{DataType.kline.value}/{symbol}/{time_interval}"
+        kline_symbol_dir = f"{DATA_DIR}/data/{TradeType.um_futures.value}/daily/{DataType.kline.value}/{symbol}/{time_interval}"
+        kline_symbol_dir = Path(kline_symbol_dir)
         if kline_symbol_dir.exists():
             manager = AwsDataFileManager(kline_symbol_dir)
             verified_files = manager.get_verified_files()
@@ -625,7 +626,8 @@ def parse_downloaded_data(
                     printLog(f"     未指定时间范围，解析所有 {len(verified_files)} 个文件", level="debug")
                 
                 # 确保解析目录存在（包含data/前缀）
-                symbol_parsed_dir = parsed_data_dir / f"{BASE_DATA_PATH}/{TradeType.um_futures.value}/daily/{DataType.kline.value}/{symbol}/{time_interval}"
+                symbol_parsed_dir = f"{PARSED_DATA_DIR}/data/{TradeType.um_futures.value}/daily/{DataType.kline.value}/{symbol}/{time_interval}"
+                symbol_parsed_dir = Path(symbol_parsed_dir)
                 symbol_parsed_dir.mkdir(parents=True, exist_ok=True)
                 
                 # 清理旧的CSV文件
@@ -877,98 +879,6 @@ def get_final_dataframe(resampled_files: List[Path], symbol: str) -> pl.DataFram
     return pl.DataFrame()
 
 
-async def main() -> None:
-    """主函数"""
-    # 使用全局配置
-    http_proxy = HTTP_PROXY
-    data_dir = DATA_DIR
-    parsed_data_dir = PARSED_DATA_DIR
-    
-    # 时间范围
-    start_date = TEST_START_DATE
-    end_date = TEST_END_DATE
-    
-    # 测试单个货币对
-    test_symbol = TEST_SYMBOL
-    
-    try:
-        # 创建output目录用于保存图片
-        output_dir = OUTPUT_DIR
-        output_dir.mkdir(exist_ok=True)
-        
-        # 1. 获取单个货币对的K线数据（重采样到5分钟）
-        printLog(f"\n获取 {test_symbol} 的K线数据（{start_date} ~ {end_date}）...")
-        kline_df = await get_kline_dataframe(
-            http_proxy=http_proxy,
-            symbol=test_symbol,
-            start_date=start_date,
-            end_date=end_date,
-            data_dir=data_dir,
-            parsed_data_dir=parsed_data_dir,
-            frequency="5m"
-        )
-        
-        if not kline_df.is_empty():
-            printLog(f"获取 {test_symbol} 的K线数据", level="debug")
-
-            printLog(f"   行数: {len(kline_df)}", level="debug")
-            printLog(f"   列: {list(kline_df.columns)}", level="debug")
-            
-            # 绘制K线数据的close价格
-            printLog(f"绘制 {test_symbol} 的K线数据...")
-            save_path = output_dir / f"{test_symbol}_close_5m_{start_date}_{end_date}.png"
-            plot_dataframe(kline_df, data_type='kline', symbol=test_symbol, save_path=save_path)
-        
-        # 2. 获取单个货币对的Metrics数据
-        printLog(f"\n获取 {test_symbol} 的Metrics数据（{start_date} ~ {end_date}）...")
-        metrics_df = await get_metrics_dataframe(
-            http_proxy=http_proxy,
-            symbol=test_symbol,
-            start_date=start_date,
-            end_date=end_date,
-            data_dir=data_dir
-        )
-        
-        if not metrics_df.is_empty():
-            printLog(f"成功获取 {test_symbol} 的Metrics数据")
-            printLog(f"   行数: {len(metrics_df)}", level="debug")
-            printLog(f"   列: {list(metrics_df.columns)}", level="debug")
-
-            # 绘制Metrics数据
-            printLog(f"绘制 {test_symbol} 的Metrics数据...")
-            save_path = output_dir / f"{test_symbol}_metrics_{start_date}_{end_date}.png"
-            plot_dataframe(metrics_df, data_type='metrics', symbol=test_symbol, save_path=save_path)
-
-        # 将kline_df和metrics_df合并，处理缺失数据
-        if not kline_df.is_empty() and not metrics_df.is_empty():
-            printLog(f"\n合并 {test_symbol} 的K线数据和Metrics数据...")
-            
-            # 调用函数合并数据
-            merged_df, warning_dict = merge_kline_and_metrics(kline_df, metrics_df, test_symbol)
-            
-            # 保存警告信息到warning.json
-            if warning_dict:
-                import json
-                with open(WARNING_JSON, "w") as f:
-                    json.dump(warning_dict, f, indent=2)
-                printLog(f"警告信息已保存到 {WARNING_JSON}")
-            
-            printLog(f"数据合并完成")
-            printLog(f"   合并后行数: {len(merged_df)}", level="run")
-            printLog(f"   合并后列: {list(merged_df.columns)}", level="debug")
-            
-            # 保存合并后的数据
-            # merged_df.write_csv("./merged_data.csv")
-            # printLog(f"   ✅ 合并后的数据已保存到 ./merged_data.csv")
-
-        printLog("\n所有功能测试完成")
-        
-    except Exception as e:
-        printLog(f"程序运行失败: {e}", level="error")
-        import traceback
-        traceback.print_exc()
-
-
 def merge_kline_and_metrics(kline_df, metrics_df, symbol):
     """
     合并K线数据和Metrics数据，处理缺失数据
@@ -1015,7 +925,7 @@ def merge_kline_and_metrics(kline_df, metrics_df, symbol):
     
     warning_dict = {}
     if not missing_metrics.is_empty():
-        printLog(f"发现 {len(missing_metrics)} 行缺失Metrics数据")
+        printLog(f"发现 {len(missing_metrics)} 行缺失Metrics数据",level="run")
         
         # 输出警告信息到warning.json
         # 将datetime转换为字符串格式以便JSON序列化
@@ -1054,7 +964,98 @@ def merge_kline_and_metrics(kline_df, metrics_df, symbol):
     return merged_df, warning_dict
 
 
+async def main() -> None:
+
+    Path(RootPath).mkdir(exist_ok=True)
+    DATA_DIR.mkdir(exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    PARSED_DATA_DIR.mkdir(exist_ok=True)
+
+    """主函数"""
+    # 使用全局配置
+    http_proxy = HTTP_PROXY
+    
+    # 时间范围
+    start_date = TEST_START_DATE
+    end_date = TEST_END_DATE
+    
+    # 测试单个货币对
+    test_symbol = TEST_SYMBOL
+    
+    try:
+        # 创建output目录用于保存图片
+        output_dir = OUTPUT_DIR
+        output_dir.mkdir(exist_ok=True)
+        
+        # 1. 获取单个货币对的K线数据（重采样到5分钟）
+        printLog(f"\n获取 {test_symbol} 的K线数据（{start_date} ~ {end_date}）...", level="run")
+        kline_df = await get_kline_dataframe(
+            http_proxy=http_proxy,
+            symbol=test_symbol,
+            start_date=start_date,
+            end_date=end_date,
+            frequency="5m"
+        )
+        
+        if not kline_df.is_empty():
+            printLog(f"   行数: {len(kline_df)}", level="debug")
+            printLog(f"   列: {list(kline_df.columns)}", level="debug")
+            
+            # # 绘制K线数据的close价格
+            # printLog(f"绘制 {test_symbol} 的K线数据...")
+            # save_path = output_dir / f"{test_symbol}_close_5m_{start_date}_{end_date}.png"
+            # plot_dataframe(kline_df, data_type='kline', symbol=test_symbol, save_path=save_path)
+        
+        # 2. 获取单个货币对的Metrics数据
+        printLog(f"\n获取 {test_symbol} 的Metrics数据（{start_date} ~ {end_date}）...",level="run")
+        metrics_df = await get_metrics_dataframe(
+            http_proxy=http_proxy,
+            symbol=test_symbol,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        
+        if not metrics_df.is_empty():
+            printLog(f"   行数: {len(metrics_df)}", level="debug")
+            printLog(f"   列: {list(metrics_df.columns)}", level="debug")
+
+            # 绘制Metrics数据
+            # printLog(f"绘制 {test_symbol} 的Metrics数据...")
+            # save_path = output_dir / f"{test_symbol}_metrics_{start_date}_{end_date}.png"
+            # plot_dataframe(metrics_df, data_type='metrics', symbol=test_symbol, save_path=save_path)
+
+        # 将kline_df和metrics_df合并，处理缺失数据
+        if not kline_df.is_empty() and not metrics_df.is_empty():
+            printLog(f"\n合并 {test_symbol} 的K线数据和Metrics数据...")
+            
+            # 调用函数合并数据
+            merged_df, warning_dict = merge_kline_and_metrics(kline_df, metrics_df, test_symbol)
+            
+            # 保存警告信息到warning.json
+            if warning_dict:
+                import json
+                with open(WARNING_JSON, "w") as f:
+                    json.dump(warning_dict, f, indent=2)
+                printLog(f"警告信息已保存到 {WARNING_JSON}")
+            
+            printLog(f"数据合并完成")
+            printLog(f"   合并后行数: {len(merged_df)}", level="run")
+            printLog(f"   合并后列: {list(merged_df.columns)}", level="debug")
+            
+            # 保存合并后的数据
+            # merged_df.write_csv("./merged_data.csv")
+            # printLog(f"   ✅ 合并后的数据已保存到 ./merged_data.csv")
+
+        printLog("\n所有功能测试完成")
+        
+    except Exception as e:
+        printLog(f"程序运行失败: {e}", level="error")
+        import traceback
+        traceback.print_exc()
+
+
 if __name__ == "__main__":
+    setPath("./DownLoadData")
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
