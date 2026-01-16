@@ -1,5 +1,5 @@
 from datetime import timedelta
-from typing import Dict
+from typing import Dict, Optional, Union
 
 import polars as pl
 
@@ -14,7 +14,7 @@ class HoloKlineResampler:
     time frames with configurable offsets, supporting both spot and futures data.
     """
 
-    def __init__(self, resample_interval: str | timedelta):
+    def __init__(self, resample_interval: Union[str, timedelta]):
         """
         Initialize the resampler.
 
@@ -29,8 +29,8 @@ class HoloKlineResampler:
     def resample(
         self,
         ldf: pl.LazyFrame,
-        offset: str | timedelta = "0m",
-        schema: Dict[str, pl.DataType] | None = None,
+        offset: Union[str, timedelta] = "0m",
+        schema: Optional[Dict[str, pl.DataType]] = None,
     ) -> pl.LazyFrame:
         """
         Resample 1m kline data to the configured interval.
@@ -109,7 +109,7 @@ class HoloKlineResampler:
         self,
         ldf: pl.LazyFrame,
         base_offset: str,
-        schema: Dict[str, pl.DataType] | None = None,
+        schema: Optional[Dict[str, pl.DataType]] = None,
     ) -> Dict[str, pl.LazyFrame]:
         """
         Generate resampled data for multiple offsets based on base_offset.

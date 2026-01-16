@@ -1,5 +1,7 @@
 import os
+import os
 import time
+from typing import Optional
 
 import polars as pl
 from tqdm import tqdm
@@ -24,7 +26,7 @@ def polars_mp_env():
 
 def execute_polars_batch(
     tasks: list[pl.LazyFrame], desc: str, batch_size: int = 32, return_results: bool = False
-) -> list[pl.DataFrame] | None:
+) -> Optional[list[pl.DataFrame]]:
     """
     Execute a list of Polars LazyFrame tasks in batches with progress tracking.
 

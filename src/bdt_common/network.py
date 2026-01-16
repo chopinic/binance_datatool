@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar, Union
 
 import aiohttp
 
@@ -17,7 +17,7 @@ async def async_retry_getter(
     _max_times: int = 5,
     _sleep_seconds: float = 1,
     **kwargs: Any,
-) -> GetterRetType | None:
+) -> Optional[GetterRetType]:
     """Call an async function with retries using exponential backoff.
 
     This helper retries the given async callable when generic exceptions occur, doubling the sleep between attempts.
@@ -60,7 +60,7 @@ async def async_retry_getter(
             _sleep_seconds *= 2
 
 
-def create_aiohttp_session(timeout_sec: int | float) -> aiohttp.ClientSession:
+def create_aiohttp_session(timeout_sec: Union[int, float]) -> aiohttp.ClientSession:
     """Create an aiohttp ClientSession with specified timeout.
 
     Factory function to create a configured aiohttp ClientSession with a total timeout.

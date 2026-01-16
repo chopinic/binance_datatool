@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date, datetime, timedelta
+from typing import Union
 from zoneinfo import ZoneInfo
 
 from dateutil import parser as date_parser
@@ -51,7 +52,7 @@ def convert_interval_to_timedelta(time_interval: str) -> timedelta:
     raise ValueError("time_interval %s format error", time_interval)
 
 
-def convert_date(dt: str | date) -> date:
+def convert_date(dt: Union[str, date]) -> date:
     if isinstance(dt, str):
         return date_parser.parse(dt).date()
     return dt

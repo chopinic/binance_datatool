@@ -27,7 +27,7 @@ import matplotlib.dates as mdates
 from matplotlib import style
 
 # 网络配置
-HTTP_PROXY = "http://127.0.0.1:7890"  # 7890代理
+GLOBAL_HTTP_PROXY = "http://127.0.0.1:7890"  # 7890代理
 
 # 数据路径配置
 RootPath = r"D:\Codes\GitHub\BinanceData\Download"
@@ -55,8 +55,8 @@ WARNING_JSON = Path("./warning.json")  # 警告信息文件
 
 # 测试配置
 TEST_SYMBOL = "BTCUSDT"
-TEST_START_DATE = "2026-01-01"
-TEST_END_DATE = "2026-01-10"
+TEST_START_DATE = "2025-02-01"
+TEST_END_DATE = "2025-02-10"
 
 # 设置matplotlib样式
 style.use('seaborn-v0_8-darkgrid')
@@ -93,7 +93,7 @@ from bhds.holo_kline.splitter import HoloKlineSplitter
 from bhds.holo_kline.resampler import HoloKlineResampler
 
 
-async def get_all_um_symbols(http_proxy: str) -> List[str]:
+async def get_all_um_symbols(http_proxy: str = "") -> List[str]:
     """
     获取所有UM交易对
     
@@ -103,6 +103,9 @@ async def get_all_um_symbols(http_proxy: str) -> List[str]:
     Returns:
         所有UM交易对列表
     """
+    if http_proxy == "":
+        global GLOBAL_HTTP_PROXY
+        http_proxy = GLOBAL_HTTP_PROXY
     async with create_aiohttp_session(HTTP_TIMEOUT_SEC) as session:
         client = create_aws_client_from_config(
             trade_type=TradeType.um_futures,
@@ -231,7 +234,9 @@ async def _download_single_symbol_data(
             
             return True
     except Exception as e:
+        import traceback
         printLog(f"下载 {symbol} 的{data_type.value}数据失败: {e}", level="error")
+        printLog(traceback.format_exc())
         return False
 
 async def _check_data_exists(
@@ -300,12 +305,12 @@ async def _check_data_exists(
     return True  # 所有日期的数据都存在
 
 async def get_kline_dataframe(
-    http_proxy: str,
     symbol: str,
     start_date: str,
     end_date: str,
     time_interval: str = "1m",
-    frequency: str = "1h"
+    frequency: str = "1h",
+    http_proxy: str = "",
 ) -> pl.DataFrame:
     """
     获取单个货币对的K线数据DataFrame
@@ -324,6 +329,13 @@ async def get_kline_dataframe(
         K线数据的DataFrame
     """
     global PARSED_DATA_DIR
+    global GLOBAL_HTTP_PROXY
+    setPath(RootPath)
+
+    printLog(f"\n获取 {symbol} 的K线数据（{start_date} ~ {end_date}）...", level="run")
+
+    if http_proxy == "":
+        http_proxy = GLOBAL_HTTP_PROXY
     # 检查数据是否已下载
     data_exists = await _check_data_exists(
         symbol=symbol,
@@ -477,10 +489,10 @@ def plot_dataframe(
 
 
 async def get_metrics_dataframe(
-    http_proxy: str,
     symbol: str,
     start_date: str,
     end_date: str,
+    http_proxy: str = "",
 ) -> pl.DataFrame:
     """
     获取单个货币对的Metrics数据DataFrame
@@ -495,6 +507,11 @@ async def get_metrics_dataframe(
     Returns:
         Metrics数据的DataFrame
     """
+    global GLOBAL_HTTP_PROXY 
+    if http_proxy == "":
+        http_proxy = GLOBAL_HTTP_PROXY
+    printLog(f"\n获取 {symbol} 的Metrics数据（{start_date} ~ {end_date}）...",level="run")
+
     # 检查数据是否已下载
     data_exists = await _check_data_exists(
         symbol=symbol,
@@ -961,6 +978,16 @@ def merge_kline_and_metrics(kline_df, metrics_df, symbol):
     # 移除临时时间列
     merged_df = merged_df.drop("candle_end_time_dt")
     
+    if warning_dict:
+        import json
+        with open(WARNING_JSON, "w") as f:
+            json.dump(warning_dict, f, indent=2)
+        printLog(f"警告信息已保存到 {WARNING_JSON}")
+    
+    printLog(f"数据合并完成")
+    printLog(f"   合并后行数: {len(merged_df)}", level="run")
+    printLog(f"   合并后列: {list(merged_df.columns)}", level="debug")
+
     return merged_df, warning_dict
 
 
@@ -972,8 +999,6 @@ async def main() -> None:
     PARSED_DATA_DIR.mkdir(exist_ok=True)
 
     """主函数"""
-    # 使用全局配置
-    http_proxy = HTTP_PROXY
     
     # 时间范围
     start_date = TEST_START_DATE
@@ -988,9 +1013,7 @@ async def main() -> None:
         output_dir.mkdir(exist_ok=True)
         
         # 1. 获取单个货币对的K线数据（重采样到5分钟）
-        printLog(f"\n获取 {test_symbol} 的K线数据（{start_date} ~ {end_date}）...", level="run")
         kline_df = await get_kline_dataframe(
-            http_proxy=http_proxy,
             symbol=test_symbol,
             start_date=start_date,
             end_date=end_date,
@@ -1007,9 +1030,7 @@ async def main() -> None:
             # plot_dataframe(kline_df, data_type='kline', symbol=test_symbol, save_path=save_path)
         
         # 2. 获取单个货币对的Metrics数据
-        printLog(f"\n获取 {test_symbol} 的Metrics数据（{start_date} ~ {end_date}）...",level="run")
         metrics_df = await get_metrics_dataframe(
-            http_proxy=http_proxy,
             symbol=test_symbol,
             start_date=start_date,
             end_date=end_date,
@@ -1032,15 +1053,6 @@ async def main() -> None:
             merged_df, warning_dict = merge_kline_and_metrics(kline_df, metrics_df, test_symbol)
             
             # 保存警告信息到warning.json
-            if warning_dict:
-                import json
-                with open(WARNING_JSON, "w") as f:
-                    json.dump(warning_dict, f, indent=2)
-                printLog(f"警告信息已保存到 {WARNING_JSON}")
-            
-            printLog(f"数据合并完成")
-            printLog(f"   合并后行数: {len(merged_df)}", level="run")
-            printLog(f"   合并后列: {list(merged_df.columns)}", level="debug")
             
             # 保存合并后的数据
             # merged_df.write_csv("./merged_data.csv")

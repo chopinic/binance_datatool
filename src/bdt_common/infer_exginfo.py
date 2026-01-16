@@ -1,9 +1,11 @@
 import re
 
+from typing import Optional
 from bdt_common.constants import LEVERAGE_EXCLUDES, LEVERAGE_SUFFIXES, QUOTES, STABLECOINS
 from bdt_common.enums import ContractType
 
-def infer_spot_info(symbol: str) -> dict | None:
+def infer_spot_info(symbol: str) -> Optional[dict]:
+
     """
     Infer spot trading pair information from a given symbol.
 

@@ -6,6 +6,7 @@ Provides independent detector classes for identifying missing data without Binan
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional, Union
 from bdt_common.enums import DataFrequency, DataType, TradeType
 from bdt_common.log_kit import logger
 from bhds.aws.local import LocalAwsClient
@@ -206,7 +207,7 @@ class FundingRateDetector(BaseDetector):
 
 
 def create_detector(
-    data_type: DataType, trade_type: TradeType, base_dir: str | Path, interval: str | None = None
+    data_type: DataType, trade_type: TradeType, base_dir: Union[str, Path], interval: Optional[str] = None
 ) -> BaseDetector:
     """
     Factory method to create appropriate detector based on data type.

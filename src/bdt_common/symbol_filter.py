@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Union
 
 from bdt_common.enums import ContractType, TradeType
 from bdt_common.infer_exginfo import infer_cm_futures_info, infer_spot_info, infer_um_futures_info
@@ -15,7 +15,7 @@ class BaseSymbolFilter(ABC):
     def is_valid(self, info: dict) -> bool:
         pass
 
-    def filter(self, infos: list[str | dict]) -> list[str]:
+    def filter(self, infos: list[Union[str, dict]]) -> list[str]:
         filtered_symbols = []
         for info in infos:
             if isinstance(info, str):
@@ -26,7 +26,7 @@ class BaseSymbolFilter(ABC):
                 filtered_symbols.append(info["symbol"])
         return filtered_symbols
 
-    def __call__(self, infos: list[str | dict]) -> list[str]:
+    def __call__(self, infos: list[Union[str, dict]]) -> list[str]:
         return self.filter(infos)
 
 

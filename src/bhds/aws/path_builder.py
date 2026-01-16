@@ -1,5 +1,5 @@
 from pathlib import PurePosixPath
-from typing import Union
+from typing import Optional, Union
 
 from bdt_common.enums import DataFrequency, DataType, TradeType
 
@@ -72,7 +72,7 @@ def create_path_builder(
     trade_type: TradeType,
     data_freq: DataFrequency,
     data_type: DataType,
-    time_interval: str | None = None,
+    time_interval: Optional[str] = None,
 ) -> AwsPathBuilder:
     """Create an AWS path builder for Binance market data.
 
