@@ -137,9 +137,12 @@ def test_parser_creation():
         funding_parser = create_aws_parser(DataType.funding_rate)
         logger.ok(f"Successfully created funding parser, Type: {type(funding_parser).__name__}")
 
-        # Test error handling
+        metrics_parser = create_aws_parser(DataType.metrics)
+        logger.ok(f"Successfully created metrics parser, Type: {type(metrics_parser).__name__}")
+
+        # Test error handling with an unsupported DataType
         try:
-            create_aws_parser(DataType.agg_trade)  # Use an unsupported DataType
+            create_aws_parser(DataType.agg_trade)
             logger.error("Should have raised ValueError for invalid type")
         except ValueError as e:
             logger.ok(f"Correctly handled invalid type: {e}")

@@ -194,6 +194,69 @@ class FundingParser(AwsCsvParser):
         )
 
 
+class MetricsParser(AwsCsvParser):
+    """Parser for metrics data from Binance.
+
+    Handles CSV files containing various metrics for perpetual futures.
+    """
+
+    @property
+    def column_definitions(self) -> Dict[str, pl.DataType]:
+        """Column definitions for metrics data."""
+        return {}
+
+    @property
+    def all_columns(self) -> List[str]:
+        """All columns in metrics CSV files."""
+        return []  # 不指定列名，让Polars自动处理
+
+    @property
+    def header_check_prefix(self) -> str:
+        """Header prefix for metrics CSV files."""
+        # Metrics文件没有header，返回一个不会匹配任何数据行的字符串
+        return "header"  # 这样就不会跳过任何行
+
+    def read_csv_from_zip(self, zip_file: Path) -> pl.DataFrame:
+        """Read and parse CSV data from a zip file. Override base class method for more flexibility."""
+        if not zip_file.exists():
+            raise FileNotFoundError(f"Zip file not found: {zip_file}")
+
+        with ZipFile(zip_file) as f:
+            # Get the first file in the zip archive
+            csv_filename = f.namelist()[0]
+            
+            # 直接从zip文件读取并解析CSV
+            import io
+            with f.open(csv_filename) as csv_file:
+                content = csv_file.read().decode()
+                # 使用Polars读取CSV内容，不指定列名
+                df = pl.read_csv(io.StringIO(content), has_header=False)
+                
+        # Apply post-processing
+        return self.post_process(df.lazy()).collect()
+
+    def post_process(self, df: pl.LazyFrame) -> pl.LazyFrame:
+        """Post-process metrics data with column renaming and flexible data conversion."""
+        return df.with_columns(
+            # 两列都是symbol，只保留一列
+            pl.col("column_1").alias("symbol"),
+            # 尝试将第三列转换为日期时间，使用strict=False避免转换失败
+            pl.col("column_3")
+            .str.strptime(pl.Datetime, format="%Y-%m-%d %H:%M:%S", strict=False)
+            .dt.replace_time_zone("UTC")
+            .alias("timestamp"),
+            # 转换数值列，使用strict=False处理可能的非数值
+            pl.col("column_4").cast(pl.Float64, strict=False).alias("open_interest"),
+            pl.col("column_5").cast(pl.Float64, strict=False).alias("open_interest_value"),
+            pl.col("column_6").cast(pl.Float64, strict=False).alias("funding_rate"),
+            pl.col("column_7").cast(pl.Float64, strict=False).alias("mark_price"),
+            pl.col("column_8").cast(pl.Float64, strict=False).alias("index_price"),
+        ).select([
+            "symbol", "timestamp", "open_interest", "open_interest_value",
+            "funding_rate", "mark_price", "index_price"
+        ])
+
+
 def create_aws_parser(data_type: DataType) -> AwsCsvParser:
     """Create a parser instance for the specified AWS data type.
 
@@ -214,8 +277,15 @@ def create_aws_parser(data_type: DataType) -> AwsCsvParser:
 
         >>> parser = create_aws_parser(DataType.funding_rate)
         >>> df = parser.read_csv_from_zip("BTCUSDT-funding-2023-01.zip")
+        
+        >>> parser = create_aws_parser(DataType.metrics)
+        >>> df = parser.read_csv_from_zip("BTCUSDT-metrics-2023-01-01.zip")
     """
-    parsers = {DataType.kline: KlineParser, DataType.funding_rate: FundingParser}
+    parsers = {
+        DataType.kline: KlineParser,
+        DataType.funding_rate: FundingParser,
+        DataType.metrics: MetricsParser,
+    }
 
     if data_type not in parsers:
         available = list(parsers.keys())

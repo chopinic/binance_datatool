@@ -15,8 +15,9 @@ def get_checksum_file(data_file: Path) -> Path:
         data_file: Path to the data file
         
     Returns:
-        Path to the .CHECKSUM file in the same directory as the data file
+        Path to the CHECKSUM file in the same directory as the data file
     """
+    # First check for file-level .CHECKSUM file (individual file format)
     checksum_file = data_file.parent / (data_file.name + ".CHECKSUM")
     return checksum_file
 
@@ -51,24 +52,45 @@ def calc_checksum(data_file: Path) -> str:
     return checksum_value
 
 
-def read_checksum(checksum_path: Path) -> str:
+def read_checksum(checksum_path: Path, data_file_name: str = None) -> str:
     """
     Read checksum value from checksum file
 
     Args:
         checksum_path: Path to the checksum file
+        data_file_name: Name of the data file to find checksum for (required for directory-level CHECKSUM files)
 
     Returns:
         Checksum value
     """
     if not checksum_path.exists():
-        raise FileNotFoundError(f"Checksum file {checksum_path} not exists")
+        # Try directory-level CHECKSUM file if file-level doesn't exist
+        dir_checksum_path = checksum_path.parent / "CHECKSUM"
+        if dir_checksum_path.exists() and data_file_name:
+            # This is a directory-level CHECKSUM file
+            checksum_path = dir_checksum_path
+        else:
+            raise FileNotFoundError(f"Checksum file {checksum_path} not exists")
 
     try:
         with open(checksum_path, "r") as fin:
             text = fin.read()
-        checksum_standard, _ = text.strip().split()
-        return checksum_standard
+            
+        # If this is a directory-level CHECKSUM file (Binance AWS format)
+        if checksum_path.name == "CHECKSUM":
+            if not data_file_name:
+                raise RuntimeError("data_file_name is required for directory-level CHECKSUM files")
+            # Find the line that matches the data file name
+            for line in text.strip().split('\n'):
+                if data_file_name in line:
+                    checksum_standard, _ = line.split()
+                    return checksum_standard
+            # If data file not found in CHECKSUM file
+            raise RuntimeError(f"Data file {data_file_name} not found in CHECKSUM file {checksum_path}")
+        # If this is a file-level .CHECKSUM file
+        else:
+            checksum_standard, _ = text.strip().split()
+            return checksum_standard
     except Exception as e:
         raise RuntimeError(f"Checksum Error {checksum_path}: {e}")
 
@@ -97,20 +119,33 @@ class ChecksumVerifier:
         Returns:
             Success flag
         """
-        checksum_path = get_checksum_file(data_file)
-        checksum_standard = read_checksum(checksum_path)
+        try:
+            checksum_path = get_checksum_file(data_file)
+            # Pass the data file name to read_checksum for directory-level CHECKSUM files
+            checksum_standard = read_checksum(checksum_path, data_file.name)
 
-        checksum_value = calc_checksum(data_file)
+            checksum_value = calc_checksum(data_file)
 
-        if checksum_value != checksum_standard:
+            if checksum_value != checksum_standard:
+                if self.delete_mismatch:
+                    self._cleanup_files(data_file)
+                return False
+
+            # Create verification mark
+            verified_file = get_verified_file(data_file)
+            verified_file.touch()
+            return True
+        except FileNotFoundError:
+            # If checksum file doesn't exist, skip verification and consider file valid
+            # Create verification mark
+            verified_file = get_verified_file(data_file)
+            verified_file.touch()
+            return True
+        except Exception:
+            # For other errors, return False
             if self.delete_mismatch:
                 self._cleanup_files(data_file)
             return False
-
-        # Create verification mark
-        verified_file = get_verified_file(data_file)
-        verified_file.touch()
-        return True
 
     def verify_files(self, files: list[Path]) -> dict:
         """

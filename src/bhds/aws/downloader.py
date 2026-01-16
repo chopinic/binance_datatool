@@ -5,8 +5,42 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
+import aiohttp
 from bdt_common.constants import BINANCE_AWS_DATA_PREFIX
 from bdt_common.log_kit import divider, logger
+
+
+async def aiohttp_download_files(download_infos: list[tuple[str, Path]], http_proxy: Optional[str] = None) -> int:
+    """
+    Download files from AWS S3 using aiohttp library.
+
+    Args:
+        download_infos: List of tuples containing (aws_url, local_file_path) pairs
+        http_proxy: HTTP proxy URL string, or None for no proxy
+
+    Returns:
+        int: Number of failed downloads (0 for all success)
+    """
+    failed_count = 0
+    connector = aiohttp.TCPConnector(limit=10)  # Limit concurrent connections to 10
+    timeout = aiohttp.ClientTimeout(total=300, connect=60, sock_connect=60, sock_read=60)
+    
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+        for aws_url, local_file in download_infos:
+            # Ensure parent directory exists
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            try:
+                async with session.get(aws_url, proxy=http_proxy) as response:
+                    response.raise_for_status()
+                    with open(local_file, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            f.write(chunk)
+            except Exception as e:
+                logger.error(f"Failed to download {aws_url} to {local_file}: {e}")
+                failed_count += 1
+    
+    return failed_count
 
 
 def get_aria2c_exec() -> str:
@@ -88,7 +122,7 @@ class AwsDownloader:
         self.http_proxy = http_proxy
         self.verbose = verbose
 
-    def aws_download(self, aws_files: list[PurePosixPath], max_tries=3):
+    async def aws_download(self, aws_files: list[PurePosixPath], max_tries=3):
         """
         Download multiple files from AWS S3 with retry logic and batch processing.
 
@@ -132,12 +166,28 @@ class AwsDownloader:
                         f"{batch_infos[0][1].name} -- {batch_infos[-1][1].name}"
                     )
 
-                # Execute download for current batch using aria2c
-                returncode = aria2_download_files(batch_infos, self.http_proxy)
+                # Try to use aria2c first, fall back to aiohttp if aria2c is not available
+                try:
+                    # Execute download for current batch using aria2c
+                    import asyncio
+                    returncode = await asyncio.to_thread(aria2_download_files, batch_infos, self.http_proxy)
 
-                # Log batch completion status if verbose mode is enabled
-                if self.verbose:
-                    if returncode == 0:
-                        logger.ok(f"Batch{batch_idx}, Aria2 download successfully")
-                    else:
-                        logger.error(f"Batch{batch_idx}, Aria2 exited with code {returncode}")
+                    # Log batch completion status if verbose mode is enabled
+                    if self.verbose:
+                        if returncode == 0:
+                            logger.ok(f"Batch{batch_idx}, Aria2 download successfully")
+                        else:
+                            logger.error(f"Batch{batch_idx}, Aria2 exited with code {returncode}")
+                except FileNotFoundError:
+                    # Fall back to aiohttp download if aria2c is not available
+                    if self.verbose:
+                        logger.info(f"Batch{batch_idx}, Aria2 not available, using aiohttp for download")
+                    
+                    failed_count = await aiohttp_download_files(batch_infos, self.http_proxy)
+                    
+                    # Log batch completion status if verbose mode is enabled
+                    if self.verbose:
+                        if failed_count == 0:
+                            logger.ok(f"Batch{batch_idx}, aiohttp download successfully")
+                        else:
+                            logger.error(f"Batch{batch_idx}, aiohttp download failed for {failed_count} files")

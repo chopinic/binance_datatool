@@ -126,7 +126,7 @@ class AwsDownloadTask:
         # Only pass http_proxy to AwsDownloader if use_proxy_for_aria2c is True
         proxy_for_downloader = self.http_proxy if self.use_proxy_for_aria2c else None
         downloader = AwsDownloader(local_dir=self.aws_data_dir, http_proxy=proxy_for_downloader, verbose=True)
-        downloader.aws_download(all_files)
+        await downloader.aws_download(all_files)
 
     def _verify_files(self, client: AwsClient) -> None:
         """Verify checksums for downloaded files and optionally delete mismatches.

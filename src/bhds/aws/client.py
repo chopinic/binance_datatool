@@ -93,7 +93,8 @@ class AwsClient:
             if "CommonPrefixes" in xml_data:
                 # CommonPrefixes contains directory-like prefixes
                 results.extend([PurePosixPath(x["Prefix"]) for x in xml_data["CommonPrefixes"]])
-            elif "Contents" in xml_data:
+            # Always check for files, regardless of whether there are subdirectories
+            if "Contents" in xml_data:
                 # Contents contains actual file objects
                 results.extend([PurePosixPath(x["Key"]) for x in xml_data["Contents"]])
 
