@@ -54,13 +54,15 @@ class Holo1mKlineMerger:
             trade_type=trade_type, data_freq=DataFrequency.monthly, data_type=DataType.funding_rate
         )
 
-    def generate(self, symbol: str, output_path: Path) -> pl.LazyFrame:
+    def generate(self, symbol: str, output_path: Path, start_time: Optional[pl.Expr] = None, end_time: Optional[pl.Expr] = None) -> pl.LazyFrame:
         """
         Generate holo_1m_kline for a single symbol and save
 
         Args:
             symbol: Trading pair symbol (e.g. "BTCUSDT")
             output_path: Output file path
+            start_time: Start time for filtering
+            end_time: End time for filtering
 
         Returns:
             pl.LazyFrame: Processed LazyFrame
@@ -78,6 +80,12 @@ class Holo1mKlineMerger:
             .unique("candle_begin_time")
             .sort("candle_begin_time")
         )
+        
+        # Filter by time range if provided
+        if start_time is not None:
+            ldf = ldf.filter(pl.col("candle_begin_time") >= start_time)
+        if end_time is not None:
+            ldf = ldf.filter(pl.col("candle_begin_time") <= end_time)
 
         # Add VWAP (optional, clipped to [low, high])
         if self.include_vwap:
@@ -107,13 +115,15 @@ class Holo1mKlineMerger:
         # Save result (maintain LazyFrame)
         return ldf.sink_parquet(output_path, lazy=True)
 
-    def generate_all(self, output_dir: Path, target_symbols: Optional[list[str]] = None) -> list[pl.LazyFrame]:
+    def generate_all(self, output_dir: Path, target_symbols: Optional[list[str]] = None, start_time: Optional[pl.Expr] = None, end_time: Optional[pl.Expr] = None) -> list[pl.LazyFrame]:
         """
         Generate holo_1m_kline for all symbols in batch
 
         Args:
             output_dir: Output directory
             target_symbols: List of symbols to process
+            start_time: Start time for filtering
+            end_time: End time for filtering
 
         Returns:
             list[pl.LazyFrame]: List of LazyFrames
@@ -128,7 +138,7 @@ class Holo1mKlineMerger:
         results = []
         for symbol in symbols:
             output_path = output_dir / f"{symbol}.parquet"
-            ldf = self.generate(symbol, output_path)
+            ldf = self.generate(symbol, output_path, start_time, end_time)
             results.append(ldf)
 
         return results

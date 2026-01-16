@@ -10,7 +10,7 @@
 # 添加当前项目的src目录到Python路径
 import sys
 from pathlib import Path
-
+logLevel = "debug"  # "debug" 或 "run"，debug输出所有日志，run只输出关键步骤和错误
 # 获取当前脚本所在目录的父目录（项目根目录）
 project_root = Path(__file__).resolve().parent.parent
 # 添加src目录到Python路径
@@ -21,15 +21,51 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 import polars as pl
+import polars.selectors as cs
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import style
 
-# 全局数据路径常量
+# 全局配置变量
+# 日志级别："debug" 或 "run"，debug输出所有日志，run只输出关键步骤和错误
+logLevel = "run"
+
+# 网络配置
+HTTP_PROXY = "http://127.0.0.1:7890"  # 7890代理
+
+# 数据路径配置
 BASE_DATA_PATH = "data"
+DATA_DIR = Path("d:/Codes/binance_datatool-main/data")  # 数据保存目录
+PARSED_DATA_DIR = Path("d:/Codes/binance_datatool-main/parsed_data")  # 解析后的数据目录
+OUTPUT_DIR = Path("d:/Codes/binance_datatool-main/output")  # 输出目录
+
+# 临时文件路径
+WARNING_JSON = Path("./warning.json")  # 警告信息文件
+
+# 测试配置
+TEST_SYMBOL = "BTCUSDT"
+TEST_START_DATE = "2026-01-01"
+TEST_END_DATE = "2026-01-10"
 
 # 设置matplotlib样式
 style.use('seaborn-v0_8-darkgrid')
+
+# 日志函数
+def printLog(message, level="info"):
+    """
+    日志输出函数，根据logLevel控制输出
+    
+    Args:
+        message: 日志消息
+        level: 日志级别，可选值："info"（普通信息）、"error"（错误）、"debug"（调试信息）
+    """
+    if logLevel == "debug":
+        # debug级别输出所有日志
+        print(message)
+    else:
+        # run级别只输出关键步骤开始点和错误
+        if level in ["run", "error"] or any(prefix in message for prefix in ["获取", "成功", "失败", "发现"]):
+            print(message)
 
 from bdt_common.constants import HTTP_TIMEOUT_SEC
 from bdt_common.enums import DataFrequency, DataType, TradeType
@@ -88,9 +124,9 @@ def filter_files_by_time_range(files: List[Path], start_date: str, end_date: str
     filtered_files = []
     
     # 先输出所有获取到的zip文件，方便调试
-    print(f"  共获取到 {len(zip_files)} 个zip文件, {len(checksum_files)} 个CHECKSUM文件")
+    printLog(f"  共获取到 {len(zip_files)} 个zip文件, {len(checksum_files)} 个CHECKSUM文件", level="debug")
     if zip_files:
-        print(f"  最新的5个文件: {', '.join([f.name for f in sorted(zip_files)[-5:]])}")
+        printLog(f"  最新的5个文件: {', '.join([f.name for f in sorted(zip_files)[-5:]])}", level="debug")
     
     # 日期匹配逻辑 - 处理zip文件
     for file_path in zip_files:
@@ -157,14 +193,14 @@ async def _download_single_symbol_data(
             range_files = filter_files_by_time_range(files, start_date, end_date)
             
             if not range_files:
-                print(f"⚠️  没有找到 {symbol} 的{data_type.value}文件")
+                printLog(f"没有找到 {symbol} 的{data_type.value}文件")
                 return False
             
             # 下载文件
-            print(f"📥 下载 {symbol} 的{data_type.value}数据...")
-            print(f"  下载文件列表 ({len(range_files)} 个):")
+            printLog(f"下载 {symbol} 的{data_type.value}数据...")
+            printLog(f"  下载文件列表 ({len(range_files)} 个):", level="debug")
             for file in range_files:
-                print(f"    - {file.name}")
+                printLog(f"    - {file.name}", level="debug")
             await downloader.aws_download(range_files)
             
             # 验证文件
@@ -178,14 +214,14 @@ async def _download_single_symbol_data(
             
             if unverified_files:
                 results = verifier.verify_files(unverified_files)
-                print(f"✅ 验证完成: {results['success']} 个成功, {results['failed']} 个失败")
+                printLog(f"验证完成: {results['success']} 个成功, {results['failed']} 个失败")
                 if results['failed'] > 0:
-                    print(f"❌ 验证失败详情: {results['errors']}")
+                    printLog(f"验证失败详情: {results['errors']}", level="error")
                 return results['failed'] == 0
             
             return True
     except Exception as e:
-        print(f"❌ 下载 {symbol} 的{data_type.value}数据失败: {e}")
+        printLog(f"下载 {symbol} 的{data_type.value}数据失败: {e}", level="error")
         return False
 
 async def _check_data_exists(
@@ -249,7 +285,7 @@ async def _check_data_exists(
     
     # 如果有缺少的日期，打印日志并返回False
     if missing_dates:
-        print(f"  ⚠️  缺少以下日期的数据: {', '.join(missing_dates[:5])}{'...' if len(missing_dates) > 5 else ''}")
+        printLog(f"  缺少以下日期的数据: {', '.join(missing_dates[:5])}{'...' if len(missing_dates) > 5 else ''}")
         return False
     
     return True  # 所有日期的数据都存在
@@ -302,7 +338,7 @@ async def get_kline_dataframe(
             end_date=end_date
         )
     else:
-        print(f"✅ {symbol} 的K线数据已存在，跳过下载")
+        printLog(f"{symbol} 的K线数据已存在，跳过下载")
     
     # 解析数据
     parse_downloaded_data(
@@ -320,10 +356,10 @@ async def get_kline_dataframe(
         temp_path = Path(temp_dir)
         
         # 生成全息K线
-        holo_files = generate_holo_klines(parsed_data_dir, TradeType.um_futures, temp_path, symbols=[symbol])
+        holo_files = generate_holo_klines(parsed_data_dir, TradeType.um_futures, temp_path, symbols=[symbol], start_date=start_date, end_date=end_date)
         
         if not holo_files:
-            print(f"❌ 无法生成 {symbol} 的全息K线")
+            printLog(f"无法生成 {symbol} 的全息K线", level="error")
             return pl.DataFrame()
         
         # 检测和处理间隙
@@ -336,12 +372,7 @@ async def get_kline_dataframe(
         
         # 获取最终DataFrame
         result_df = get_final_dataframe(resampled_files, symbol)
-        
-        # 将结果保存为CSV文件
-        csv_path = Path("./tempKlines.csv")
-        result_df.write_csv(csv_path)
-        print(f"✅ 数据已保存到: {csv_path}")
-        
+                
         return result_df
 
 def plot_dataframe(
@@ -362,7 +393,7 @@ def plot_dataframe(
         figsize: 图片尺寸
     """
     if df.is_empty():
-        print("❌ 数据为空，无法绘图")
+        printLog("数据为空，无法绘图", level="error")
         return
     
     # 自动检测数据类型
@@ -393,7 +424,7 @@ def plot_dataframe(
             plt.ylabel('Price')
             plt.title(f'{symbol} Close Price Chart' if symbol else 'Close Price Chart')
         else:
-            print("❌ K线数据缺少必要的列: 'candle_begin_time' 或 'close'")
+            printLog("K线数据缺少必要的列: 'candle_begin_time' 或 'close'", level="error")
             return
     
     elif data_type == 'metrics':
@@ -404,7 +435,7 @@ def plot_dataframe(
                 df = df.with_columns(pl.col('timestamp').str.to_datetime())
             
             # 获取数值列
-            numeric_columns = df.select([pl.col(pl.NUMERIC_DTYPES)]).columns
+            numeric_columns = df.select([cs.numeric()]).columns
             
             # 绘制所有数值列
             for col in numeric_columns:
@@ -418,11 +449,11 @@ def plot_dataframe(
             
             plt.title(f'{symbol} Metrics Chart' if symbol else 'Metrics Chart')
         else:
-            print("❌ Metrics数据缺少必要的列: 'timestamp'")
+            printLog("Metrics数据缺少必要的列: 'timestamp'", level="error")
             return
     
     else:
-        print(f"❌ 不支持的数据类型: {data_type}")
+        printLog(f"不支持的数据类型: {data_type}", level="error")
         return
     
     # 添加网格和图例
@@ -433,7 +464,7 @@ def plot_dataframe(
     # 保存或显示图片
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"✅ 图片已保存到: {save_path}")
+        printLog(f"图片已保存到: {save_path}")
     else:
         plt.show()
     
@@ -483,7 +514,7 @@ async def get_metrics_dataframe(
             end_date=end_date
         )
     else:
-        print(f"✅ {symbol} 的Metrics数据已存在，跳过下载")
+        printLog(f"{symbol} 的Metrics数据已存在，跳过下载")
     
     metrics_symbol_dir = data_dir / f"{BASE_DATA_PATH}/{TradeType.um_futures.value}/daily/{DataType.metrics.value}/{symbol}"
     if metrics_symbol_dir.exists():
@@ -500,12 +531,12 @@ async def get_metrics_dataframe(
                     # 分离zip文件和其他文件
                     filtered_zip_files = [f for f in filtered_files if f.name.endswith('.zip')]
                     if filtered_zip_files:
-                        print(f"     筛选出 {len(filtered_zip_files)} 个Metrics文件在 {start_date} - {end_date} 范围内")
+                        printLog(f"     筛选出 {len(filtered_zip_files)} 个Metrics文件在 {start_date} - {end_date} 范围内", level="debug")
                     else:
-                        print(f"     没有找到在 {start_date} - {end_date} 范围内的Metrics文件")
+                        printLog(f"没有找到在 {start_date} - {end_date} 范围内的Metrics文件")
                         return pl.DataFrame()
                 else:
-                    print(f"     未指定时间范围，解析所有 {len(verified_files)} 个Metrics文件")
+                    printLog(f"     未指定时间范围，解析所有 {len(verified_files)} 个Metrics文件", level="debug")
                 
                 # 尝试创建metrics解析器
                 metrics_parser = create_aws_parser(DataType.metrics)
@@ -513,7 +544,7 @@ async def get_metrics_dataframe(
                 # 只处理zip文件
                 filtered_zip_files = [f for f in filtered_files if f.name.endswith('.zip')]
                 if not filtered_zip_files:
-                    print(f"⚠️  没有找到可解析的Metrics zip文件")
+                    printLog(f"没有找到可解析的Metrics zip文件")
                     return pl.DataFrame()
                 
                 # 读取所有符合条件的文件并合并
@@ -523,22 +554,22 @@ async def get_metrics_dataframe(
                         # 从zip文件读取CSV数据
                         df = metrics_parser.read_csv_from_zip(zip_file)
                         dfs.append(df)
-                        print(f"     ✅ 解析 {zip_file.name}")
+                        printLog(f"解析 {zip_file.name}", level="debug")
                     except Exception as e:
-                        print(f"     ❌ 解析 {zip_file.name} 失败: {e}")
+                        printLog(f"解析 {zip_file.name} 失败: {e}", level="error")
                 
                 if dfs:
                     # 合并所有DataFrame
                     combined_df = pl.concat(dfs)
-                    print(f"✅ 成功解析 {symbol} 的Metrics数据，共 {len(combined_df)} 行")
+                    printLog(f"成功解析 {symbol} 的Metrics数据，共 {len(combined_df)} 行")
                     return combined_df
                 else:
-                    print(f"⚠️  没有成功解析任何Metrics文件")
+                    printLog(f"没有成功解析任何Metrics文件")
                     return pl.DataFrame()
                     
             except Exception as e:
-                print(f"❌ 解析 {symbol} 的Metrics数据失败: {e}")
-                print("⚠️  当前版本可能不支持Metrics数据的解析")
+                printLog(f"解析 {symbol} 的Metrics数据失败: {e}", level="error")
+                printLog(f"当前版本可能不支持Metrics数据的解析")
                 import traceback
                 traceback.print_exc()
     
@@ -564,12 +595,12 @@ def parse_downloaded_data(
         start_date: 起始日期（YYYY-MM-DD格式），仅解析此日期之后的数据
         end_date: 结束日期（YYYY-MM-DD格式），仅解析此日期之前的数据
     """
-    print(f"\n🔄 解析下载的数据...")
+    printLog(f"\n解析下载的数据...")
     
     kline_parser = create_aws_parser(DataType.kline)
     
     for symbol in symbols:
-        print(f"   解析 {symbol}...")
+        printLog(f"解析 {symbol}...", level="debug")
         
         # 解析K线数据
         kline_symbol_dir = data_dir / f"{BASE_DATA_PATH}/{TradeType.um_futures.value}/daily/{DataType.kline.value}/{symbol}/{time_interval}"
@@ -586,12 +617,12 @@ def parse_downloaded_data(
                     # 分离zip文件和其他文件
                     filtered_zip_files = [f for f in filtered_files if f.name.endswith('.zip')]
                     if filtered_zip_files:
-                        print(f"     筛选出 {len(filtered_zip_files)} 个文件在 {start_date} - {end_date} 范围内")
+                        printLog(f"     筛选出 {len(filtered_zip_files)} 个文件在 {start_date} - {end_date} 范围内", level="debug")
                     else:
-                        print(f"     没有找到在 {start_date} - {end_date} 范围内的文件")
+                        printLog(f"     没有找到在 {start_date} - {end_date} 范围内的文件", level="debug")
                         continue
                 else:
-                    print(f"     未指定时间范围，解析所有 {len(verified_files)} 个文件")
+                    printLog(f"     未指定时间范围，解析所有 {len(verified_files)} 个文件", level="debug")
                 
                 # 确保解析目录存在（包含data/前缀）
                 symbol_parsed_dir = parsed_data_dir / f"{BASE_DATA_PATH}/{TradeType.um_futures.value}/daily/{DataType.kline.value}/{symbol}/{time_interval}"
@@ -600,7 +631,7 @@ def parse_downloaded_data(
                 # 清理旧的CSV文件
                 for csv_file in symbol_parsed_dir.glob("*.csv"):
                     csv_file.unlink()
-                    print(f"     🗑️  删除旧的CSV文件: {csv_file.name}")
+                    printLog(f"删除旧的CSV文件: {csv_file.name}", level="debug")
                 
                 # 只处理zip文件
                 for zip_file in [f for f in filtered_files if f.name.endswith('.zip')]:
@@ -611,18 +642,20 @@ def parse_downloaded_data(
                         # 保存为Parquet文件
                         parquet_file = symbol_parsed_dir / f"{zip_file.stem}.parquet"
                         df.write_parquet(parquet_file)
-                        print(f"     ✅ 解析 {zip_file.name} -> {parquet_file.name}")
+                        printLog(f"解析 {zip_file.name} -> {parquet_file.name}", level="debug")
                     except Exception as e:
-                        print(f"     ❌ 解析 {zip_file.name} 失败: {e}")
+                        printLog(f"解析 {zip_file.name} 失败: {e}", level="error")
     
-    print("✅ 数据解析完成")
+    printLog("数据解析完成")
 
 
 def generate_holo_klines(
     parsed_data_dir: Path,
     trade_type: TradeType,
     output_dir: Path,
-    symbols: Optional[List[str]] = None
+    symbols: Optional[List[str]] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
 ) -> List[Path]:
     """
     生成全息k线
@@ -632,11 +665,13 @@ def generate_holo_klines(
         trade_type: 交易类型
         output_dir: 输出目录
         symbols: 要处理的符号列表，如果为None则处理所有符号
+        start_date: 起始日期（YYYY-MM-DD格式）
+        end_date: 结束日期（YYYY-MM-DD格式）
     
     Returns:
         生成的全息k线文件列表
     """
-    print(f"\n🔄 生成全息k线...")
+    printLog(f"\n生成全息k线...")
     merger = Holo1mKlineMerger(
         trade_type=trade_type,
         base_dir=parsed_data_dir,
@@ -644,10 +679,32 @@ def generate_holo_klines(
         include_funding=True,
     )
     
+    # 转换日期字符串为Polars datetime对象
+    start_time = None
+    end_time = None
+    
+    if start_date and end_date:
+        from datetime import datetime
+        import polars as pl
+        
+        # 解析日期字符串
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        
+        # 转换为Polars datetime对象
+        start_time = pl.datetime(
+            year=start_dt.year, month=start_dt.month, day=start_dt.day,
+            time_zone="UTC"
+        )
+        end_time = pl.datetime(
+            year=end_dt.year, month=end_dt.month, day=end_dt.day,
+            time_zone="UTC"
+        ) + pl.duration(days=1) - pl.duration(microseconds=1)
+    
     # 生成指定符号的全息k线
-    lazy_frames = merger.generate_all(output_dir, target_symbols=symbols)
+    lazy_frames = merger.generate_all(output_dir, target_symbols=symbols, start_time=start_time, end_time=end_time)
     if not lazy_frames:
-        print("❌ 没有找到可处理的符号")
+        printLog("没有找到可处理的符号", level="error")
         return []
     
     # 执行Polars批处理以生成文件
@@ -655,7 +712,7 @@ def generate_holo_klines(
     
     # 获取生成的文件
     generated_files = list(output_dir.glob("*.parquet"))
-    print(f"✅ 成功生成 {len(generated_files)} 个全息k线文件")
+    printLog(f"生成 {len(generated_files)} 个全息k线文件", level="debug")
     return generated_files
 
 
@@ -679,9 +736,9 @@ def detect_and_process_gaps(
     Returns:
         (有间隙的符号数, 生成的分割文件数)
     """
-    print(f"\n🔄 检测间隙...")
-    print(f"     Min days: {min_days}")
-    print(f"     Min price change: {min_price_chg * 100}%")
+    printLog(f"\n🔄 检测间隙...")
+    printLog(f"     Min days: {min_days}", level="debug")
+    printLog(f"     Min price change: {min_price_chg * 100}%", level="debug")
     
     detector = HoloKlineGapDetector(min_days, min_price_chg)
     splitter = HoloKlineSplitter(prefix="SP")
@@ -722,8 +779,8 @@ def detect_and_process_gaps(
             symbol = file_path.stem
             symbols_with_gaps += 1
             
-            print(f"\n🔍 {symbol} - {len(gaps_df)} gap(s)")
-            print("-" * 40)
+            printLog(f"\n🔍 {symbol} - {len(gaps_df)} gap(s)", level="debug")
+            printLog("-" * 40, level="debug")
             
             # 过滤出指定时间范围内的间隙
             if has_time_filter:
@@ -733,11 +790,11 @@ def detect_and_process_gaps(
                 )
             
             for gap in gaps_df.sort("time_diff", descending=True).iter_rows(named=True):
-                print(f"  {gap['prev_begin_time']} → {gap['candle_begin_time']}")
-                print(f"  Duration: {gap['time_diff']}, Change: {gap['price_change']:.2%}")
+                printLog(f"  {gap['prev_begin_time']} → {gap['candle_begin_time']}", level="debug")
+                printLog(f"  Duration: {gap['time_diff']}, Change: {gap['price_change']:.2%}", level="debug")
             
             # 根据检测到的间隙分割k线数据
-            print(f"  分割 {symbol}...")
+            printLog(f"  分割 {symbol}...", level="debug")
             split_files = splitter.split_file(file_path, gaps_df)
             total_splits += len(split_files)
             
@@ -745,10 +802,10 @@ def detect_and_process_gaps(
                 seg_df = pl.read_parquet(split_file)
                 min_begin_time = seg_df["candle_begin_time"].min()
                 max_begin_time = seg_df["candle_begin_time"].max()
-                print(f"    {split_file.name}: {len(seg_df)} 行, {min_begin_time} 到 {max_begin_time}")
-    
-    print(f"\n📈 总结: {symbols_with_gaps}/{len(holo_files)} 个符号有间隙")
-    print(f"         生成了 {total_splits} 个分割文件")
+                printLog(f"    {split_file.name}: {len(seg_df)} 行, {min_begin_time} 到 {max_begin_time}", level="debug")
+
+    printLog(f"\n总结: {symbols_with_gaps}/{len(holo_files)} 个符号有间隙")
+    printLog(f"         生成了 {total_splits} 个分割文件")
     
     return symbols_with_gaps, total_splits
 
@@ -765,7 +822,7 @@ def resample_holo_klines(holo_files: List[Path], output_dir: Path, frequency: st
     Returns:
         重采样后的文件列表
     """
-    print(f"\n🔄 将数据重采样到{frequency}...")
+    printLog(f"\n将数据重采样到{frequency}...")
     
     # 初始化重采样器
     resampler = HoloKlineResampler(resample_interval=frequency)
@@ -790,13 +847,14 @@ def resample_holo_klines(holo_files: List[Path], output_dir: Path, frequency: st
             resampled_df.write_parquet(output_file)
             resampled_files.append(output_file)
             
-            print(f"   ✅ {symbol}: {len(df)} 行 → {len(resampled_df)} 行")
+            printLog(f"{symbol}: {len(df)} 行 → {len(resampled_df)} 行", level="debug")
         except Exception as e:
-            print(f"   ❌ {symbol}: 重采样失败 - {e}")
+            printLog(f"{symbol}: 重采样失败 - {e}", level="error")
             import traceback
             traceback.print_exc()
     
-    print(f"✅ 成功重采样 {len(resampled_files)} 个文件到1h")
+    printLog(f"成功重采样 {len(resampled_files)} 个文件到{frequency}")
+
     return resampled_files
 
 
@@ -815,31 +873,31 @@ def get_final_dataframe(resampled_files: List[Path], symbol: str) -> pl.DataFram
         if file_path.stem.startswith(symbol):
             return pl.read_parquet(file_path)
     
-    print(f"❌ 没有找到 {symbol} 的重采样文件")
+    printLog(f"没有找到 {symbol} 的重采样文件", level="error")
     return pl.DataFrame()
 
 
 async def main() -> None:
     """主函数"""
-    # 配置
-    http_proxy = "http://127.0.0.1:7890"  # 7890代理
-    data_dir = Path("d:/Codes/binance_datatool-main/data")  # 数据保存目录
-    parsed_data_dir = Path("d:/Codes/binance_datatool-main/parsed_data")  # 解析后的数据目录
+    # 使用全局配置
+    http_proxy = HTTP_PROXY
+    data_dir = DATA_DIR
+    parsed_data_dir = PARSED_DATA_DIR
     
     # 时间范围
-    start_date = "2026-01-01"
-    end_date = "2026-01-10"
+    start_date = TEST_START_DATE
+    end_date = TEST_END_DATE
     
     # 测试单个货币对
-    test_symbol = "BTCUSDT"
+    test_symbol = TEST_SYMBOL
     
     try:
         # 创建output目录用于保存图片
-        output_dir = Path("d:/Codes/binance_datatool-main/output")
+        output_dir = OUTPUT_DIR
         output_dir.mkdir(exist_ok=True)
         
         # 1. 获取单个货币对的K线数据（重采样到5分钟）
-        print(f"\n📊 获取 {test_symbol} 的K线数据（{start_date} ~ {end_date}）...")
+        printLog(f"\n获取 {test_symbol} 的K线数据（{start_date} ~ {end_date}）...")
         kline_df = await get_kline_dataframe(
             http_proxy=http_proxy,
             symbol=test_symbol,
@@ -851,17 +909,18 @@ async def main() -> None:
         )
         
         if not kline_df.is_empty():
-            print(f"✅ 成功获取 {test_symbol} 的K线数据")
-            print(f"   行数: {len(kline_df)}")
-            print(f"   列: {list(kline_df.columns)}")
+            printLog(f"获取 {test_symbol} 的K线数据", level="debug")
+
+            printLog(f"   行数: {len(kline_df)}", level="debug")
+            printLog(f"   列: {list(kline_df.columns)}", level="debug")
             
             # 绘制K线数据的close价格
-            print(f"📊 绘制 {test_symbol} 的K线数据...")
+            printLog(f"绘制 {test_symbol} 的K线数据...")
             save_path = output_dir / f"{test_symbol}_close_5m_{start_date}_{end_date}.png"
             plot_dataframe(kline_df, data_type='kline', symbol=test_symbol, save_path=save_path)
         
         # 2. 获取单个货币对的Metrics数据
-        print(f"\n📊 获取 {test_symbol} 的Metrics数据（{start_date} ~ {end_date}）...")
+        printLog(f"\n获取 {test_symbol} 的Metrics数据（{start_date} ~ {end_date}）...")
         metrics_df = await get_metrics_dataframe(
             http_proxy=http_proxy,
             symbol=test_symbol,
@@ -871,30 +930,136 @@ async def main() -> None:
         )
         
         if not metrics_df.is_empty():
-            print(f"✅ 成功获取 {test_symbol} 的Metrics数据")
-            print(f"   行数: {len(metrics_df)}")
-            print(f"   列: {list(metrics_df.columns)}")
-            metrics_df.to_csv("./tempMetrics.csv", index=False)
+            printLog(f"成功获取 {test_symbol} 的Metrics数据")
+            printLog(f"   行数: {len(metrics_df)}", level="debug")
+            printLog(f"   列: {list(metrics_df.columns)}", level="debug")
 
             # 绘制Metrics数据
-            print(f"📊 绘制 {test_symbol} 的Metrics数据...")
+            printLog(f"绘制 {test_symbol} 的Metrics数据...")
             save_path = output_dir / f"{test_symbol}_metrics_{start_date}_{end_date}.png"
             plot_dataframe(metrics_df, data_type='metrics', symbol=test_symbol, save_path=save_path)
-        
-        print("\n✅ 所有功能测试完成")
+
+        # 将kline_df和metrics_df合并，处理缺失数据
+        if not kline_df.is_empty() and not metrics_df.is_empty():
+            printLog(f"\n合并 {test_symbol} 的K线数据和Metrics数据...")
+            
+            # 调用函数合并数据
+            merged_df, warning_dict = merge_kline_and_metrics(kline_df, metrics_df, test_symbol)
+            
+            # 保存警告信息到warning.json
+            if warning_dict:
+                import json
+                with open(WARNING_JSON, "w") as f:
+                    json.dump(warning_dict, f, indent=2)
+                printLog(f"警告信息已保存到 {WARNING_JSON}")
+            
+            printLog(f"数据合并完成")
+            printLog(f"   合并后行数: {len(merged_df)}", level="run")
+            printLog(f"   合并后列: {list(merged_df.columns)}", level="debug")
+            
+            # 保存合并后的数据
+            # merged_df.write_csv("./merged_data.csv")
+            # printLog(f"   ✅ 合并后的数据已保存到 ./merged_data.csv")
+
+        printLog("\n所有功能测试完成")
         
     except Exception as e:
-        print(f"❌ 程序运行失败: {e}")
+        printLog(f"程序运行失败: {e}", level="error")
         import traceback
         traceback.print_exc()
+
+
+def merge_kline_and_metrics(kline_df, metrics_df, symbol):
+    """
+    合并K线数据和Metrics数据，处理缺失数据
+    
+    参数:
+        kline_df: 包含K线数据的DataFrame
+        metrics_df: 包含Metrics数据的DataFrame
+        symbol: 交易对符号
+    
+    返回:
+        merged_df: 合并后的数据
+        warning_dict: 警告信息字典，如果没有缺失数据则为空字典
+    """
+    import polars as pl
+    
+    # 直接使用之前获取的数据框，统一时间格式
+    printLog(f"K线数据: {len(kline_df)} 行, {list(kline_df.columns)}", level="debug")
+    printLog(f"Metrics数据: {len(metrics_df)} 行, {list(metrics_df.columns)}", level="debug")
+    
+    # 确保时间列都有正确的时区信息和相同的时间精度
+    # 转换kline_df的candle_end_time为UTC时区的datetime格式（转换为微秒精度）
+    kline_df = kline_df.with_columns(
+        candle_end_time_dt=pl.col("candle_end_time").dt.replace_time_zone("UTC").dt.cast_time_unit("us")
+    )
+    
+    # 转换metrics_df的timestamp为UTC时区的datetime格式（确保微秒精度）
+    metrics_df = metrics_df.with_columns(
+        timestamp_dt=pl.col("timestamp").dt.replace_time_zone("UTC").dt.cast_time_unit("us")
+    )
+    
+    # 合并数据
+    merged_df = kline_df.join(
+        metrics_df, 
+        left_on="candle_end_time_dt", 
+        right_on="timestamp_dt", 
+        how="left"
+    )
+    
+    # 查看合并后的数据结构
+    printLog(f"合并后数据: {len(merged_df)} 行, {list(merged_df.columns)}", level="debug")
+    
+    # 检查缺失值
+    missing_metrics = merged_df.filter(pl.col("timestamp").is_null())
+    
+    warning_dict = {}
+    if not missing_metrics.is_empty():
+        printLog(f"发现 {len(missing_metrics)} 行缺失Metrics数据")
+        
+        # 输出警告信息到warning.json
+        # 将datetime转换为字符串格式以便JSON序列化
+        missing_timestamps = missing_metrics.with_columns(
+            pl.col("candle_end_time").dt.strftime("%Y-%m-%dT%H:%M:%S.%f%z").alias("candle_end_time")
+        ).select("candle_end_time").to_dicts()
+        
+        warning_dict = {
+            "symbol": symbol,
+            "missing_count": len(missing_metrics),
+            "missing_timestamps": missing_timestamps
+        }
+    
+    # 移除不需要的列
+    metrics_columns = ["sum_open_interest", "sum_open_interest_value", "count_toptrader_long_short_ratio", "sum_toptrader_long_short_ratio", "count_long_short_ratio", "sum_taker_long_short_vol_ratio"]
+    
+    # 只删除存在的列
+    columns_to_drop = []
+    if "symbol" in merged_df.columns:
+        columns_to_drop.append("symbol")
+    if "timestamp" in merged_df.columns:
+        columns_to_drop.append("timestamp")
+    if "timestamp_dt" in merged_df.columns:
+        columns_to_drop.append("timestamp_dt")
+    
+    merged_df = merged_df.drop(columns_to_drop)
+    
+    # 使用前向填充处理缺失的metrics数据
+    merged_df = merged_df.with_columns(
+        [pl.col(col).forward_fill() for col in metrics_columns]
+    )
+    
+    # 移除临时时间列
+    merged_df = merged_df.drop("candle_end_time_dt")
+    
+    return merged_df, warning_dict
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n⏹️  程序已被用户中断")
+        printLog("\n⏹️  程序已被用户中断")
     except Exception as e:
-        print(f"\n❌ 程序运行失败: {e}")
+        printLog(f"\n❌ 程序运行失败: {e}", level="error")
         import traceback
         traceback.print_exc()

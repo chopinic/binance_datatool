@@ -238,22 +238,24 @@ class MetricsParser(AwsCsvParser):
     def post_process(self, df: pl.LazyFrame) -> pl.LazyFrame:
         """Post-process metrics data with column renaming and flexible data conversion."""
         return df.with_columns(
-            # 两列都是symbol，只保留一列
-            pl.col("column_1").alias("symbol"),
-            # 尝试将第三列转换为日期时间，使用strict=False避免转换失败
-            pl.col("column_3")
+            # 映射正确的列名（根据metrics数据格式：create_time,symbol,sum_open_interest,sum_open_interest_value,count_toptrader_long_short_ratio,sum_toptrader_long_short_ratio,count_long_short_ratio,sum_taker_long_short_vol_ratio）
+            pl.col("column_2").alias("symbol"),
+            # 将第一列转换为日期时间作为timestamp
+            pl.col("column_1")
             .str.strptime(pl.Datetime, format="%Y-%m-%d %H:%M:%S", strict=False)
             .dt.replace_time_zone("UTC")
             .alias("timestamp"),
             # 转换数值列，使用strict=False处理可能的非数值
-            pl.col("column_4").cast(pl.Float64, strict=False).alias("open_interest"),
-            pl.col("column_5").cast(pl.Float64, strict=False).alias("open_interest_value"),
-            pl.col("column_6").cast(pl.Float64, strict=False).alias("funding_rate"),
-            pl.col("column_7").cast(pl.Float64, strict=False).alias("mark_price"),
-            pl.col("column_8").cast(pl.Float64, strict=False).alias("index_price"),
+            pl.col("column_3").cast(pl.Float64, strict=False).alias("sum_open_interest"),
+            pl.col("column_4").cast(pl.Float64, strict=False).alias("sum_open_interest_value"),
+            pl.col("column_5").cast(pl.Float64, strict=False).alias("count_toptrader_long_short_ratio"),
+            pl.col("column_6").cast(pl.Float64, strict=False).alias("sum_toptrader_long_short_ratio"),
+            pl.col("column_7").cast(pl.Float64, strict=False).alias("count_long_short_ratio"),
+            pl.col("column_8").cast(pl.Float64, strict=False).alias("sum_taker_long_short_vol_ratio"),
         ).select([
-            "symbol", "timestamp", "open_interest", "open_interest_value",
-            "funding_rate", "mark_price", "index_price"
+            "symbol", "timestamp", "sum_open_interest", "sum_open_interest_value",
+            "count_toptrader_long_short_ratio", "sum_toptrader_long_short_ratio",
+            "count_long_short_ratio", "sum_taker_long_short_vol_ratio"
         ])
 
 
