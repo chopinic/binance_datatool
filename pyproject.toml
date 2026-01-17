@@ -1,9 +1,9 @@
 [project]
 name = "binance-datatool"
-requires-python = ">=3.12"
+requires-python = ">=3.9"
 dynamic = ["version"]
 dependencies = [
-    "aiohttp>=3.12.9",
+    "aiohttp>=3.9",
     "colorama>=0.4.6",
     "polars>=1.30.0",
     "python-dateutil>=2.9.0.post0",
@@ -31,3 +31,7 @@ path = "src/bdt_common/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bhds", "src/bdt_common"]
+include = ["**/*.py"]
+
+[tool.hatch.build.force-include]
+"src/BinanceData.py" = "BinanceData.py"

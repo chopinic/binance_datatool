@@ -1,33 +1,19 @@
-import sys
-import os
 import asyncio
-
-# 将项目根目录添加到sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-import src.BinanceData as BinanceData
+import BinanceData
+import bdt_common.polars_utils
 
 async def test():
-    BinanceData.logLevel = "debug"
-    stDate =  "2025-03-01"
-    edDate =  "2025-03-10"
-    symbols = await BinanceData.get_all_um_symbols()
-
-    testSymbols = ["BTCUSDT","ETHUSDT"]
-    kline_df = await BinanceData.get_kline_dataframe(
-        symbol="BTCUSDT",
-        start_date=stDate,
-        end_date=edDate,
-        frequency="5m"
-    )
-
-    metrics_df = await BinanceData.get_metrics_dataframe(
-        symbol="BTCUSDT",
-        start_date=stDate,
-        end_date=edDate,
-    )
-
-    merged_df, warning_dict = BinanceData.merge_kline_and_metrics(kline_df, metrics_df, "BTCUSDT")
+    symbol = "UNTUSDT"
+    st = "2024-08-27"
+    ed = "2025-02-14"
+    kline_df = await BinanceData.get_kline_dataframe(symbol,st,ed,frequency="5m")
+    metrics_df = await BinanceData.get_metrics_dataframe( symbol=symbol, start_date=st, end_date=ed)
+    merged_df, warning_dict = BinanceData.merge_kline_and_metrics(kline_df, metrics_df, symbol)
+    merged_df.to_csv("./temp.csv")
+    plotData(merged_df)
+    print(warning_dict)
+    
+    # print("指标数据获取成功，共", len(metrics_df), "行")
 
 if __name__ == "__main__":
     asyncio.run(test())

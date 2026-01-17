@@ -1065,11 +1065,21 @@ async def main() -> None:
         import traceback
         traceback.print_exc()
 
+async def test():
+    symbol = "BCHUSDT"
+    st = "2024-08-27"
+    ed = "2025-03-14"
+    kline_df = await get_kline_dataframe(symbol,st,ed,frequency="5m")
+    metrics_df = await get_metrics_dataframe( symbol=symbol, start_date=st, end_date=ed)
+    merged_df, warning_dict = merge_kline_and_metrics(kline_df, metrics_df, symbol)
+    merged_df.to_csv("./temp.csv")
+    plotData(merged_df)
+    print(warning_dict)
 
 if __name__ == "__main__":
     setPath("./DownLoadData")
     try:
-        asyncio.run(main())
+        asyncio.run(test())
     except KeyboardInterrupt:
         printLog("\n⏹️  程序已被用户中断")
     except Exception as e:

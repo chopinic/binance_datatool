@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 from typing import Optional
 
 import aiohttp
+from tqdm import tqdm
 from bdt_common.constants import BINANCE_AWS_DATA_PREFIX
 from bdt_common.log_kit import divider, logger
 
@@ -26,19 +27,24 @@ async def aiohttp_download_files(download_infos: list[tuple[str, Path]], http_pr
     timeout = aiohttp.ClientTimeout(total=300, connect=60, sock_connect=60, sock_read=60)
     
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-        for aws_url, local_file in download_infos:
-            # Ensure parent directory exists
-            local_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            try:
-                async with session.get(aws_url, proxy=http_proxy) as response:
-                    response.raise_for_status()
-                    with open(local_file, 'wb') as f:
-                        async for chunk in response.content.iter_chunked(8192):
-                            f.write(chunk)
-            except Exception as e:
-                logger.error(f"Failed to download {aws_url} to {local_file}: {e}")
-                failed_count += 1
+        # Progress bar for all files
+        with tqdm(total=len(download_infos), desc="Total Downloads", unit="file") as pbar_total:
+            for aws_url, local_file in download_infos:
+                # Ensure parent directory exists
+                local_file.parent.mkdir(parents=True, exist_ok=True)
+                
+                try:
+                    async with session.get(aws_url, proxy=http_proxy) as response:
+                        response.raise_for_status()
+                        with open(local_file, 'wb') as f:
+                            async for chunk in response.content.iter_chunked(8192):
+                                f.write(chunk)
+                except Exception as e:
+                    logger.error(f"Failed to download {aws_url} to {local_file}: {e}")
+                    failed_count += 1
+                
+                # Update total progress bar
+                pbar_total.update(1)
     
     return failed_count
 
