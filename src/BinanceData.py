@@ -73,9 +73,12 @@ def printLog(message, level="info"):
     if logLevel == "debug":
         # debug级别输出所有日志
         print(message)
-    else:
+    elif logLevel == "run":
         # run级别只输出关键步骤开始点和错误
         if level in ["run", "error"]:
+            print(message)
+    else:
+        if level in ["error"]:
             print(message)
 
 from bdt_common.constants import HTTP_TIMEOUT_SEC
@@ -92,6 +95,11 @@ from bhds.holo_kline.gap_detector import HoloKlineGapDetector
 from bhds.holo_kline.splitter import HoloKlineSplitter
 from bhds.holo_kline.resampler import HoloKlineResampler
 
+
+def reSampleFrom(ldf,inputPeriod="1m",resamplePeriod="5m"):
+    resampler = HoloKlineResampler(resamplePeriod)
+    results = resampler.resample(ldf, offset="0m", schema=None, nowPeriod=inputPeriod)
+    return results
 
 async def get_all_um_symbols(http_proxy: str = "") -> List[str]:
     """
@@ -187,7 +195,7 @@ async def _download_single_symbol_data(
         是否成功下载
     """
     try:
-        downloader = AwsDownloader(local_dir=DATA_DIR, http_proxy=http_proxy, verbose=True)
+        downloader = AwsDownloader(local_dir=DATA_DIR, http_proxy=http_proxy, verbose=(logLevel=="debug"))
         verifier = ChecksumVerifier(delete_mismatch=False)
         
         async with create_aiohttp_session(HTTP_TIMEOUT_SEC) as session:
@@ -1067,11 +1075,13 @@ async def main() -> None:
 
 async def test():
     symbol = "BCHUSDT"
-    st = "2024-08-27"
+    st = "2025-02-27"
     ed = "2025-03-14"
     kline_df = await get_kline_dataframe(symbol,st,ed,frequency="5m")
     metrics_df = await get_metrics_dataframe( symbol=symbol, start_date=st, end_date=ed)
     merged_df, warning_dict = merge_kline_and_metrics(kline_df, metrics_df, symbol)
+    merged_df = reSampleFrom(merged_df, "5m", "4h")
+
     merged_df.to_csv("./temp.csv")
     plotData(merged_df)
     print(warning_dict)

@@ -31,14 +31,16 @@ class HoloKlineResampler:
         ldf: pl.LazyFrame,
         offset: Union[str, timedelta] = "0m",
         schema: Optional[Dict[str, pl.DataType]] = None,
+        nowPeriod: Union[str, timedelta] = "1m",
     ) -> pl.LazyFrame:
         """
-        Resample 1m kline data to the configured interval.
+        Resample kline data to the configured interval.
 
         Args:
-            lf: Input 1m kline LazyFrame
+            ldf: Input kline LazyFrame
             offset: Time offset for resampling, supports string or timedelta
             schema: Schema of the input DataFrame (optional for performance)
+            nowPeriod: Time period of the input kline data, supports string or timedelta (default: "1m")
 
         Returns:
             Resampled LazyFrame
@@ -47,7 +49,10 @@ class HoloKlineResampler:
             schema = ldf.collect_schema()
 
         # Convert time intervals to timedelta
-        time_interval = convert_interval_to_timedelta("1m")
+        if isinstance(nowPeriod, str):
+            time_interval = convert_interval_to_timedelta(nowPeriod)
+        elif isinstance(nowPeriod, timedelta):
+            time_interval = nowPeriod
 
         if isinstance(offset, str):
             offset = convert_interval_to_timedelta(offset)
@@ -71,7 +76,39 @@ class HoloKlineResampler:
             pl.col("taker_buy_base_asset_volume").sum(),
             pl.col("taker_buy_quote_asset_volume").sum(),
         ]
+        # Get column names from schema for better performance
+        column_names = schema.names()
+        
+        if "count_long_short_ratio" in column_names:
+            agg.append(pl.col("count_long_short_ratio").first().alias("count_long_short_ratio_open"))
+            agg.append(pl.col("count_long_short_ratio").last().alias("count_long_short_ratio_close"))
+            agg.append(pl.col("count_long_short_ratio").max().alias("count_long_short_ratio_high"))
+            agg.append(pl.col("count_long_short_ratio").min().alias("count_long_short_ratio_low"))
+        
+        if "sum_open_interest_value" in column_names:
+            agg.append(pl.col("sum_open_interest_value").first().alias("sum_open_interest_value_open"))
+            agg.append(pl.col("sum_open_interest_value").last().alias("sum_open_interest_value_close"))
+            agg.append(pl.col("sum_open_interest_value").max().alias("sum_open_interest_value_high"))
+            agg.append(pl.col("sum_open_interest_value").min().alias("sum_open_interest_value_low"))
+        
+        if "sum_toptrader_long_short_ratio" in column_names:
+            agg.append(pl.col("sum_toptrader_long_short_ratio").first().alias("sum_toptrader_long_short_ratio_open"))
+            agg.append(pl.col("sum_toptrader_long_short_ratio").last().alias("sum_toptrader_long_short_ratio_close"))
+            agg.append(pl.col("sum_toptrader_long_short_ratio").max().alias("sum_toptrader_long_short_ratio_high"))
+            agg.append(pl.col("sum_toptrader_long_short_ratio").min().alias("sum_toptrader_long_short_ratio_low"))
 
+        if "count_toptrader_long_short_ratio" in column_names:
+            agg.append(pl.col("count_toptrader_long_short_ratio").first().alias("count_toptrader_long_short_ratio_open"))
+            agg.append(pl.col("count_toptrader_long_short_ratio").last().alias("count_toptrader_long_short_ratio_close"))
+            agg.append(pl.col("count_toptrader_long_short_ratio").max().alias("count_toptrader_long_short_ratio_high"))
+            agg.append(pl.col("count_toptrader_long_short_ratio").min().alias("count_toptrader_long_short_ratio_low"))
+
+        if "sum_open_interest" in column_names:
+            agg.append(pl.col("sum_open_interest").first().alias("sum_open_interest_open"))
+            agg.append(pl.col("sum_open_interest").last().alias("sum_open_interest_close"))
+            agg.append(pl.col("sum_open_interest").max().alias("sum_open_interest_high"))
+            agg.append(pl.col("sum_open_interest").min().alias("sum_open_interest_low"))
+            
         # Handle vwap_1m column (corrected from vwap1m)
         if "vwap_1m" in schema:
             agg.append(pl.col("vwap_1m").first().alias("vwap_1m_open"))
@@ -110,14 +147,16 @@ class HoloKlineResampler:
         ldf: pl.LazyFrame,
         base_offset: str,
         schema: Optional[Dict[str, pl.DataType]] = None,
+        nowPeriod: Union[str, timedelta] = "1m",
     ) -> Dict[str, pl.LazyFrame]:
         """
         Generate resampled data for multiple offsets based on base_offset.
 
         Args:
-            lf: Input 1m kline LazyFrame
+            ldf: Input kline LazyFrame
             base_offset: Base offset for generating multiple resampling points
             schema: Schema of the input DataFrame (optional for performance)
+            nowPeriod: Time period of the input kline data, supports string or timedelta (default: "1m")
 
         Returns:
             Dictionary mapping offset strings to resampled LazyFrames
@@ -143,6 +182,6 @@ class HoloKlineResampler:
 
         for i in range(num_offsets):
             offset_str = f"{i * base_num}{base_unit}"
-            results[offset_str] = self.resample(ldf, offset=offset_str, schema=schema)
+            results[offset_str] = self.resample(ldf, offset=offset_str, schema=schema, nowPeriod=nowPeriod)
 
         return results
