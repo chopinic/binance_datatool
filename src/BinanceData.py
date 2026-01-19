@@ -10,6 +10,7 @@
 # 添加当前项目的src目录到Python路径
 import sys
 from pathlib import Path
+from typing import Union, List
 logLevel = "debug"  # "debug" 或 "run"，debug输出所有日志，run只输出关键步骤和错误
 # 获取当前脚本所在目录的父目录（项目根目录）
 project_root = Path(__file__).resolve().parent.parent
@@ -171,6 +172,7 @@ def filter_files_by_time_range(files: List[Path], start_date: str, end_date: str
     return filtered_files
 
 
+
 async def _download_single_symbol_data(
     http_proxy: str,
     symbol: str,
@@ -252,8 +254,9 @@ async def _check_data_exists(
     data_type: DataType,
     time_interval: str,
     start_date: str,
-    end_date: str
-) -> bool:
+    end_date: str,
+    returnList: bool = False
+) -> Union[bool, List[str]]:
     """
     检查指定类型的数据是否已经下载并验证
     
@@ -270,24 +273,34 @@ async def _check_data_exists(
     """
     from datetime import datetime, timedelta
     import re
-    
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+    fullMissing = []
+    if returnList:
+        current_dt = start_dt
+        while current_dt <= end_dt:
+            current_date_str = current_dt.strftime('%Y-%m-%d')
+            fullMissing.append(current_date_str)
+            current_dt += timedelta(days=1)
+
     data_type_path = f"{DATA_DIR}/data/{TradeType.um_futures.value}/daily/{data_type.value}/{symbol}"
     if data_type == DataType.kline:
         data_type_path += f"/{time_interval}"
     
     symbol_dir = Path(data_type_path)
     if not symbol_dir.exists():
+        if returnList:
+            return fullMissing
         return False
     
     manager = AwsDataFileManager(symbol_dir)
     verified_files = manager.get_verified_files()
     
     if not verified_files:
+        if returnList:
+            return fullMissing
         return False
     
-    # 转换日期字符串为datetime对象
-    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
     
     # 收集所有已验证文件的日期
     verified_dates = set()
@@ -308,8 +321,11 @@ async def _check_data_exists(
     # 如果有缺少的日期，打印日志并返回False
     if missing_dates:
         printLog(f"  缺少以下日期的数据: {', '.join(missing_dates[:5])}{'...' if len(missing_dates) > 5 else ''}")
+        if returnList:
+            return missing_dates
         return False
-    
+    if returnList:
+        return []
     return True  # 所有日期的数据都存在
 
 async def get_kline_dataframe(
@@ -1075,7 +1091,7 @@ async def main() -> None:
 
 async def test():
     symbol = "BCHUSDT"
-    st = "2025-02-27"
+    st = "2024-01-27"
     ed = "2025-03-14"
     kline_df = await get_kline_dataframe(symbol,st,ed,frequency="5m")
     metrics_df = await get_metrics_dataframe( symbol=symbol, start_date=st, end_date=ed)
@@ -1086,10 +1102,129 @@ async def test():
     plotData(merged_df)
     print(warning_dict)
 
+async def sendNeedDownload(symbolList,st,ed,datatype,http_proxy=""):
+    """
+    检查并下载指定时间段内的指定类型数据
+    
+    Args:
+        symbolList: 币对列表
+        st: 起始日期，格式为"YYYY-MM-DD"
+        ed: 结束日期，格式为"YYYY-MM-DD"
+        datatype: 数据类型，可以是"kline"或"metrics"
+        http_proxy: HTTP代理（可选）
+    """
+    global GLOBAL_HTTP_PROXY
+    setPath(RootPath)
+    
+    printLog(f"\n检查并下载数据（{st} ~ {ed}）...", level="run")
+    download_list = []
+    
+    # 如果没有提供代理，则使用全局代理
+    if http_proxy == "":
+        http_proxy = GLOBAL_HTTP_PROXY
+    
+    # 将datatype转换为DataType枚举
+    if datatype.lower() == "kline":
+        data_type = DataType.kline
+        time_interval = "1m"  # 默认1分钟K线
+    elif datatype.lower() == "metrics":
+        data_type = DataType.metrics
+        time_interval = "1m"  # metrics数据也使用1m作为时间间隔
+    else:
+        printLog(f"不支持的数据类型: {datatype}", level="error")
+        return
+    
+    # 创建下载器和验证器
+    downloader = AwsDownloader(local_dir=DATA_DIR, http_proxy=http_proxy, verbose=(logLevel=="debug"))
+    verifier = ChecksumVerifier(delete_mismatch=False)
+    
+    # 创建会话和客户端
+    async with create_aiohttp_session(HTTP_TIMEOUT_SEC) as session:
+        client = create_aws_client_from_config(
+            trade_type=TradeType.um_futures,
+            data_type=data_type,
+            data_freq=DataFrequency.daily,
+            time_interval=time_interval,
+            session=session,
+            http_proxy=http_proxy
+        )
+        
+        # 收集所有需要下载的文件
+        for symbol in symbolList:
+            # 检查数据是否已存在
+            missing = await _check_data_exists(
+                symbol=symbol,
+                data_type=data_type,
+                time_interval=time_interval,
+                start_date=st,
+                end_date=ed,
+                returnList=True
+            )
+            
+            if len(missing) > 0:
+                # 获取该币对的所有文件
+                files = await client.list_data_files(symbol)
+                # 过滤出指定时间范围内的文件
+                range_files = filter_files_by_time_range(files, st, ed)
+                
+                # 根据missing日期列表进一步过滤文件
+                import re
+                filtered_range_files = []
+                for file_path in range_files:
+                    # 从文件名中提取日期
+                    date_match = re.search(r'\d{4}-\d{2}-\d{2}', file_path.name)
+                    if date_match:
+                        file_date = date_match.group()
+                        # 检查文件日期是否在missing列表中
+                        if file_date in missing:
+                            filtered_range_files.append(file_path)
+                
+                # 添加到下载列表
+                download_list.extend(filtered_range_files)
+                printLog(f"添加 {symbol} 的{len(filtered_range_files)} 个文件到下载列表", level="run")
+            else:
+                printLog(f"{symbol} 的{datatype}数据已存在，跳过下载", level="run")
+        
+        # 下载所有需要的数据
+        if download_list:
+            printLog(f"\n开始下载 {len(download_list)} 个文件...", level="run")
+            await downloader.aws_download(download_list)
+            
+            # 验证所有下载的文件
+            printLog("\n验证下载的文件...", level="run")
+            all_unverified_files = []
+            
+            for symbol in symbolList:
+                # 构建数据目录路径
+                data_type_path = f"{DATA_DIR}/data/{TradeType.um_futures.value}/daily/{data_type.value}/{symbol}"
+                if data_type == DataType.kline:
+                    data_type_path += f"/{time_interval}"
+                
+                symbol_dir = Path(data_type_path)
+                if symbol_dir.exists():
+                    manager = AwsDataFileManager(symbol_dir)
+                    unverified_files = manager.get_unverified_files()
+                    all_unverified_files.extend(unverified_files)
+            
+            if all_unverified_files:
+                results = verifier.verify_files(all_unverified_files)
+                printLog(f"验证完成: {results['success']} 个成功, {results['failed']} 个失败")
+                if results['failed'] > 0:
+                    printLog(f"验证失败详情: {results['errors']}", level="error")
+        else:
+            printLog("所有数据都已存在，无需下载", level="run")
+    
+    printLog("数据检查和下载完成", level="run")
+    return
+
+
 if __name__ == "__main__":
-    setPath("./DownLoadData")
+    # setPath("./DownLoadData")
     try:
-        asyncio.run(test())
+        # asyncio.run(test())
+        asyncio.run(sendNeedDownload(["BASUSDT"], "2026-01-01", "2026-01-17", "kline"))
+        asyncio.run(get_kline_dataframe("BASUSDT","2026-01-01", "2026-01-17",frequency="5m"))
+
     except KeyboardInterrupt:
         printLog("\n⏹️  程序已被用户中断")
     except Exception as e:

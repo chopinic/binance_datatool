@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import asyncio
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
@@ -13,7 +14,7 @@ from bdt_common.log_kit import divider, logger
 
 async def aiohttp_download_files(download_infos: list[tuple[str, Path]], http_proxy: Optional[str] = None) -> int:
     """
-    Download files from AWS S3 using aiohttp library.
+    Download files from AWS S3 using aiohttp library with parallel downloads.
 
     Args:
         download_infos: List of tuples containing (aws_url, local_file_path) pairs
@@ -23,28 +24,43 @@ async def aiohttp_download_files(download_infos: list[tuple[str, Path]], http_pr
         int: Number of failed downloads (0 for all success)
     """
     failed_count = 0
-    connector = aiohttp.TCPConnector(limit=10)  # Limit concurrent connections to 10
+    # Limit concurrent connections to 20
+    connector = aiohttp.TCPConnector(limit=20)
     timeout = aiohttp.ClientTimeout(total=300, connect=60, sock_connect=60, sock_read=60)
+    
+    # Semaphore to limit parallel downloads to 20
+    semaphore = asyncio.Semaphore(20)
+    
+    async def download_file(aws_url: str, local_file: Path) -> bool:
+        """Download a single file and return True if successful, False otherwise."""
+        nonlocal failed_count
+        
+        # Ensure parent directory exists
+        local_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            async with semaphore:
+                async with session.get(aws_url, proxy=http_proxy) as response:
+                    response.raise_for_status()
+                    with open(local_file, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            f.write(chunk)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to download {aws_url} to {local_file}: {e}")
+            failed_count += 1
+            return False
+        finally:
+            # Update progress bar regardless of success or failure
+            pbar_total.update(1)
     
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         # Progress bar for all files
         with tqdm(total=len(download_infos), desc="Total Downloads", unit="file") as pbar_total:
-            for aws_url, local_file in download_infos:
-                # Ensure parent directory exists
-                local_file.parent.mkdir(parents=True, exist_ok=True)
-                
-                try:
-                    async with session.get(aws_url, proxy=http_proxy) as response:
-                        response.raise_for_status()
-                        with open(local_file, 'wb') as f:
-                            async for chunk in response.content.iter_chunked(8192):
-                                f.write(chunk)
-                except Exception as e:
-                    logger.error(f"Failed to download {aws_url} to {local_file}: {e}")
-                    failed_count += 1
-                
-                # Update total progress bar
-                pbar_total.update(1)
+            # Create download tasks
+            tasks = [download_file(aws_url, local_file) for aws_url, local_file in download_infos]
+            # Wait for all tasks to complete
+            await asyncio.gather(*tasks)
     
     return failed_count
 
