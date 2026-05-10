@@ -104,10 +104,10 @@ class ChecksumVerifier:
 
         Args:
             delete_mismatch: Whether to delete file if verification fails
-            n_jobs: Number of parallel processes, defaults to CPU cores - 2
+            n_jobs: Number of parallel processes, 
         """
         self.delete_mismatch = delete_mismatch
-        self.n_jobs = n_jobs or max(1, mp.cpu_count() - 2)
+        self.n_jobs = n_jobs or max(1,min(5, mp.cpu_count() - 2))
 
     def verify_file(self, data_file: Path) -> bool:
         """
